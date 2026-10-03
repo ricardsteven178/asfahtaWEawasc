@@ -1,5 +1,5 @@
 -- ==============================================================================
--- TELEPORT GUI v4- ESP + TWEEN SLIDER + WAYPOINT + PATHFINDING (masih dalam progress)
+-- TELEPORT GUI V1 - ESP + TWEEN SLIDER + WAYPOINT + PATHFINDING (masih dalam progress) INI VERSI LAMA yang belum ada monster deteksi yang bagus
 -- ==============================================================================
 
 if _G.TeleportGUI_Loaded then
