@@ -1,5 +1,5 @@
 -- ==============================================================================
--- TELEPORT GUI v5- ESP + TWEEN SLIDER + WAYPOINT + PATHFINDING (FINAL FIX)
+-- TELEPORT GUI v5- ESP + TWEEN SLIDER + WAYPOINT + PATHFINDING (FINAL FIX) batas
 -- ==============================================================================
 
 if _G.TeleportGUI_Loaded then
