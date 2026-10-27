@@ -1,0 +1,3751 @@
+-- ==============================================================================
+-- TELEPORT GUI v5 - SMART PRIORITY PICKUP, MONSTER REROUTE & 1-LAYER NOCLIP bukan tv
+-- ==============================================================================
+
+if _G.TeleportGUI_Loaded then
+    print("[TELEPORT GUI] Already running! Double execute dicegah.")
+    return
+end
+_G.TeleportGUI_Loaded = true
+
+-- ==============================================================================
+-- SECTION 1: DEFAULT CONFIG (STATE AWAL SAAT EXECUTE)
+-- Ubah nilai di bawah ini untuk mengatur fitur apa saja yang langsung aktif
+-- saat script pertama kali dijalankan (true = ON, false = OFF).
+-- ==============================================================================
+local Config = {
+    -- [ NOCLIP SETTINGS ]
+    NoClip              = true,      -- true = Tembus Tembok, WindowWall, Objek, Generator (InvisBlock), & Cutouts saat awal execute
+
+    -- [ TELEPORT & HYBRID Y-BYPASS SETTINGS ]
+    TeleportMode        = "Tween",   -- Pilihan default: "Instant" atau "Tween"
+    AutoElevator        = true,      -- true = Wajib otomatis pindah ke Real Elevator saat semua Generator selesai
+    HybridYMode         = false,     -- true = Aktifkan Mode Hybrid: Tween ke Tengah Collider -> Instant ke Y-Bypass -> Instant ke Tujuan
+    HybridBypassY       = -241,      -- Koordinat Y untuk loncatan Instant Teleport (Bisa diisi -240 atau 241 sesuai kebutuhan)
+    HybridBypassDelay   = 0.40,      -- Waktu tunggu (detik) saat berada di koordinat Y-Bypass sebelum pindah ke tujuan (Rentang: 0.05 s/d 5.0)
+    TweenSpeed          = 3.50,      -- Kecepatan gerak Tween saat jalan bebas / tanpa halangan (Rentang: 0.1 s/d 15.0)
+    NoClipTweenSpeed    = 1.05,      -- Kecepatan otomatis melambat saat menembus Obstacle / Tembok agar tidak teleport back (Aman: 1.0 - 1.15)
+
+    -- [ SMART AUTO PRIORITY PICKUP SETTINGS ]
+    Pickup = {
+        Enable             = true,      -- true = Otomatis ambil item berdasarkan PriorityList & jarak serta hindari item dekat monster
+        MovementMode       = "Tween",   -- Pilihan gerak Auto Pickup: "Instant" atau "Tween"
+        TweenSpeed         = 1.25,      -- Kecepatan gerak Tween khusus saat Auto Pickup berjalan
+        AuraRange          = 30,        -- Radius (studs) Auto Pickup Aura untuk menyedot item sekitar sambil jalan
+        PriorityList       = { "ResearchCapsule", "Holiday Collectible Item" }, -- Prioritas Utama (#1)
+        SecondPriorityList = { "Bandage", "HealthKit" }, -- Prioritas Kedua (#2)
+        IgnoreList         = {          -- Daftar item yang diabaikan oleh Auto Priority Pickup
+            "Tape", "Pop", "PopBottle", "JumperCable", "Valve", "SmokeBomb",
+            "EjectButton", "Box chocolates", "ChocolateBox", "AirHorn",
+            "EnigmaCandy", "Gumball", "StealthCandy", "SpeedCandy",
+            "SkillCheckCandy", "ExtractionSpeedCandy", "StaminaCandy",
+            "Chocolate", "ProteinBar", "Jawbreaker", "FakeCapsule",
+            "HolidayCollectibleItem"
+        },
+    },
+
+    -- [ MANUAL PICKUP COMPATIBILITY SETTINGS ]
+    SyncPickupWithMain  = false,     -- true = Samakan kecepatan & mode Pickup dengan TeleportMode & TweenSpeed utama
+    PickupMode          = "Tween",   -- Mode cadangan untuk dropdown manual (Otomatis disinkronkan dengan Config.Pickup.MovementMode)
+    PickupTweenSpeed    = 1.25,      -- Speed cadangan untuk dropdown manual (Otomatis disinkronkan dengan Config.Pickup.TweenSpeed)
+
+    -- [ PATHFINDING & UNDERGROUND SETTINGS ]
+    PathfindMode        = false,     -- true = Prioritas tembus 1-lapis dulu, jika gagal (>=2 lapis) otomatis memutar pakai NavMesh
+    UndergroundTeleport = false,     -- true = Teleport melewati bawah lantai biasa
+    UGDepth             = 8,         -- Kedalaman bawah lantai dalam studs (Rentang: 2 s/d 30)
+    UGRiseSpeed         = 1.0,       -- Kecepatan masuk Collider / naik-turun Underground (Rentang: 0.1 s/d 5.0)
+
+    -- [ MONSTER EVASION & THICK COLLIDER FILTER ]
+    MinHideThickness    = 3.5,       -- Ketebalan minimal (X & Z dalam studs) agar Collider dianggap tebal/aman (mengabaikan tembok/pagar tipis)
+    MonsterSafeDelay    = 5.0,       -- Waktu tunggu (detik) di tengah collider setelah monster pergi (Rentang: 0 s/d 15.0)
+    MonsterDangerRadius = 20,        -- Jarak deteksi bahaya monster dalam studs (Rentang: 5 s/d 60)
+    ItemMonsterSafeDist = 26,        -- Jarak aman minimal antara Item dengan Monster agar item tidak didekati dulu (dialihkan ke item lain)
+
+    -- [ PASSIVE / LOOSE & LETHAL MONSTER SETTINGS ]
+    LethalRadius            = 60,    -- Jarak deteksi ekstra jauh khusus untuk monster mematikan
+    AvoidmoreradiusMonsters = {
+        "DandyMonster",
+        "DyleMonster"
+    },
+    LooseRadius             = 10,    -- Jarak hindar untuk monster pasif/diam (tidak memicu stuck hide)
+    LooseMonsters           = {
+        "SquirmMonster",
+        "BlottMonster",
+        "RazzleDazzleMonster",
+        "RodgerMonster",
+        "ConnieMonster",
+        "GourdyMonster"
+    },
+
+    -- [ ESP SETTINGS ]
+    ItemESP             = { Enable = true }, -- Mendukung tabel { Enable = true } maupun boolean
+    GenESP              = true,      -- true = Tampilkan Highlight & Progress Generator (Biru/Ungu)
+    MonsterESP          = true,      -- true = Tampilkan Highlight & Nama Monster (Merah/Oranye)
+    LineESP             = true,      -- true = Tampilkan garis Beam penunjuk ke arah Monster
+    RangeESP            = true,      -- true = Tampilkan bulatan hijau indikator Range Slider Monster di sekitar karakter
+    NoClipESP           = true,      -- true = Tampilkan kotak merah (SelectionBox) pada Collider & WindowWall
+    NoClipLabel         = false,     -- true = Tampilkan teks nama pada NoClip ESP
+}
+
+-- Helper untuk membaca status ItemESP baik berupa tabel { Enable = true } maupun boolean langsung
+local function isItemESPEnabled()
+    if type(Config.ItemESP) == "table" then
+        return Config.ItemESP.Enable == true
+    end
+    return Config.ItemESP == true
+end
+
+local function setItemESPEnabled(state)
+    if type(Config.ItemESP) == "table" then
+        Config.ItemESP.Enable = state
+    else
+        Config.ItemESP = state
+    end
+end
+
+-- Sinkronisasi nilai awal Pickup
+Config.PickupMode       = Config.Pickup and Config.Pickup.MovementMode or Config.PickupMode
+Config.PickupTweenSpeed = Config.Pickup and Config.Pickup.TweenSpeed or Config.PickupTweenSpeed
+
+-- ==============================================================================
+-- SECTION 2: SERVICES & RUNTIME VARIABLES
+-- ==============================================================================
+local Players            = game:GetService("Players")
+local TweenService       = game:GetService("TweenService")
+local Workspace          = game:GetService("Workspace")
+local CoreGui            = game:GetService("CoreGui")
+local RunService         = game:GetService("RunService")
+local PathfindingService = game:GetService("PathfindingService")
+local UserInputService   = game:GetService("UserInputService")
+
+local player    = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart  = character:WaitForChild("HumanoidRootPart")
+
+local DEFAULT_GRAVITY = (Workspace.Gravity > 10) and Workspace.Gravity or 196.2
+
+local function restoreNormalGravity()
+    Workspace.Gravity = DEFAULT_GRAVITY
+end
+
+local cachedCharParts = {}
+
+local function rebuildCharPartCache(c)
+    table.clear(cachedCharParts)
+    if not c then return end
+    for _, part in ipairs(c:GetDescendants()) do
+        if part:IsA("BasePart") then
+            table.insert(cachedCharParts, part)
+        end
+    end
+end
+
+rebuildCharPartCache(character)
+
+player.CharacterAdded:Connect(function(c)
+    character = c
+    rootPart  = c:WaitForChild("HumanoidRootPart")
+    rebuildCharPartCache(c)
+    restoreNormalGravity()
+end)
+
+local Waypoints             = { A = nil, B = nil }
+local abortTeleport         = false
+local activeTween           = nil
+local isPathfinding         = false
+local isPickingUp           = false
+local isHiding              = false
+local forceCharNoClip       = false
+local cachedAllCols         = {}
+local cachedHideCols        = {}
+local cachedESPAdornees     = {}
+local cachedNoClipParts     = {}
+local cachedRealElevCF      = nil
+local cachedRealElevRoom    = nil
+local originalCollideStates = {}
+local tempHideCollideStates = {}
+local pathVisuals           = {}
+local failedRollbackZones   = {}
+local espInstances          = { _ItemESP = {}, _GenESP = {}, _MonsterESP = {}, _LineESP = {}, _NoClipESP = {} }
+local pfStatusRef           = nil
+local puStatusRef           = nil
+
+-- Lookup tables untuk PriorityList, SecondPriorityList, dan IgnoreList agar pencarian O(1) super cepat
+local priorityLookup       = {}
+local secondPriorityLookup = {}
+local ignoreLookup         = {}
+
+local function rebuildPickupLookups()
+    table.clear(priorityLookup)
+    table.clear(secondPriorityLookup)
+    table.clear(ignoreLookup)
+    if not Config.Pickup then return end
+    for _, name in ipairs(Config.Pickup.PriorityList or {}) do
+        priorityLookup[name] = true
+        priorityLookup[name:lower()] = true
+    end
+    for _, name in ipairs(Config.Pickup.SecondPriorityList or {}) do
+        secondPriorityLookup[name] = true
+        secondPriorityLookup[name:lower()] = true
+    end
+    for _, name in ipairs(Config.Pickup.IgnoreList or {}) do
+        ignoreLookup[name] = true
+        ignoreLookup[name:lower()] = true
+    end
+end
+rebuildPickupLookups()
+
+local AGENT_PARAMS            = { AgentRadius = 1.6, AgentHeight = 5.0, AgentCanJump = false, AgentCanClimb = false, WaypointSpacing = 2.5 }
+local AGENT_PARAMS_FALLBACK   = { AgentRadius = 1.2, AgentHeight = 4.5, AgentCanJump = false, AgentCanClimb = false, WaypointSpacing = 2.0 }
+local AGENT_PARAMS_LASTRESORT = { AgentRadius = 0.9, AgentHeight = 4.0, AgentCanJump = false, AgentCanClimb = false, WaypointSpacing = 1.5 }
+
+RunService.Stepped:Connect(function()
+    if (forceCharNoClip or Config.NoClip or isHiding) and character then
+        for i = 1, #cachedCharParts do
+            local part = cachedCharParts[i]
+            if part and part.Parent and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- ==============================================================================
+-- SECTION 3: MAP & GEOMETRY HELPER FUNCTIONS
+-- ==============================================================================
+local function getMap()
+    local cr = Workspace:FindFirstChild("CurrentRoom")
+    return cr and cr:FindFirstChildWhichIsA("Model")
+end
+
+local function getModelCenter(model)
+    if not model or not model:IsA("Model") then return nil end
+    local total, n = Vector3.zero, 0
+    for _, p in pairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then
+            total = total + p.Position
+            n = n + 1
+        end
+    end
+    return n > 0 and (total / n) or nil
+end
+
+local function getMonsterPart(monster)
+    if not monster or not monster:IsA("Model") then return nil end
+    return monster.PrimaryPart
+        or monster:FindFirstChild("HumanoidRootPart")
+        or monster:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function getWorldBoxSize(part)
+    local cf = part.CFrame
+    local sz = part.Size
+    local wx = math.abs(cf.RightVector.X) * sz.X + math.abs(cf.UpVector.X) * sz.Y + math.abs(cf.LookVector.X) * sz.Z
+    local wy = math.abs(cf.RightVector.Y) * sz.X + math.abs(cf.UpVector.Y) * sz.Y + math.abs(cf.LookVector.Y) * sz.Z
+    local wz = math.abs(cf.RightVector.Z) * sz.X + math.abs(cf.UpVector.Z) * sz.Y + math.abs(cf.LookVector.Z) * sz.Z
+    return Vector3.new(wx, wy, wz)
+end
+
+local function getSafePlaceCFrame()
+    local elevators = Workspace:FindFirstChild("Elevators")
+    if elevators then
+        for _, el in ipairs(elevators:GetChildren()) do
+            if el.Name == "Elevator" and el:IsA("Model") then
+                local ds  = el:FindFirstChild("DandyStore")
+                local dsh = ds and ds:FindFirstChild("DandyShop")
+                local r   = dsh and dsh:FindFirstChild("RootPart")
+                if r then return r.CFrame * CFrame.new(0, 3, 0) end
+            end
+        end
+    end
+
+    local map = getMap()
+    if map then
+        local fa = map:FindFirstChild("FreeArea")
+        local fe = fa and fa:FindFirstChild("FakeElevator")
+        if fe and fe:IsA("Model") then
+            local c = getModelCenter(fe)
+            if c then return CFrame.new(c) end
+        end
+    end
+    return nil
+end
+
+-- [OPTIMIZED] Mencari CFrame Real Elevator dengan Cache per-ruangan (Tanpa Workspace:GetDescendants() yang bikin lag)
+local function getRealElevatorCFrame()
+    local walkY = (rootPart and rootPart.Position.Y > -50 and rootPart.Position.Y < 200) and rootPart.Position.Y or nil
+    local curMap = getMap()
+
+    if cachedRealElevCF and cachedRealElevRoom == curMap then
+        return CFrame.new(cachedRealElevCF.X, walkY or cachedRealElevCF.Y, cachedRealElevCF.Z)
+    end
+
+    local elevatorsFolder = Workspace:FindFirstChild("Elevators")
+    if elevatorsFolder then
+        for _, obj in ipairs(elevatorsFolder:GetChildren()) do
+            if obj.Name == "Elevator" and obj:IsA("Model") then
+                if obj.PrimaryPart then
+                    local p = obj.PrimaryPart.Position
+                    cachedRealElevCF   = CFrame.new(p.X, p.Y + 3, p.Z)
+                    cachedRealElevRoom = curMap
+                    return CFrame.new(p.X, walkY or (p.Y + 3), p.Z)
+                else
+                    local centerPos = getModelCenter(obj)
+                    if centerPos then
+                        cachedRealElevCF   = CFrame.new(centerPos.X, centerPos.Y + 3, centerPos.Z)
+                        cachedRealElevRoom = curMap
+                        return CFrame.new(centerPos.X, walkY or (centerPos.Y + 3), centerPos.Z)
+                    end
+                end
+            end
+        end
+        for _, obj in ipairs(elevatorsFolder:GetDescendants()) do
+            if obj.Name == "ElevatorPrompt" and obj:IsA("BasePart") then
+                local cf = obj.CFrame * CFrame.new(0, 1.5, 2)
+                cachedRealElevCF   = cf
+                cachedRealElevRoom = curMap
+                return CFrame.new(cf.X, walkY or cf.Y, cf.Z)
+            end
+        end
+    end
+
+    local room = Workspace:FindFirstChild("CurrentRoom")
+    if room then
+        for _, obj in ipairs(room:GetDescendants()) do
+            if obj.Name == "ElevatorPrompt" and obj:IsA("BasePart") then
+                local parentName = string.lower(obj.Parent and obj.Parent.Name or "")
+                if not string.find(parentName, "fake") then
+                    local cf = obj.CFrame * CFrame.new(0, 1.5, 2)
+                    cachedRealElevCF   = cf
+                    cachedRealElevRoom = curMap
+                    return CFrame.new(cf.X, walkY or cf.Y, cf.Z)
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function getMachineProgress()
+    local pGui = player:FindFirstChild("PlayerGui")
+    if pGui then
+        local specGui = pGui:FindFirstChild("SpectatorGui")
+        local info = specGui and specGui:FindFirstChild("InfoFrame")
+        local genFrame = info and info:FindFirstChild("GeneratorFrame")
+        local msg = genFrame and genFrame:FindFirstChild("Message")
+        if msg and msg:IsA("TextLabel") then
+            local cur, tot = string.match(msg.Text, "Machines Completed: (%d+)/(%d+)")
+            if cur and tot then
+                return tonumber(cur), tonumber(tot)
+            end
+        end
+    end
+    return -1, -1
+end
+
+local function isFloorAllMachinesDone()
+    local map = getMap()
+    local genFolder = map and map:FindFirstChild("Generators")
+    if not genFolder then return false, -1, -1 end
+
+    local totalGens, uncompletedCount = 0, 0
+    for _, gen in ipairs(genFolder:GetChildren()) do
+        if gen:IsA("Model") then
+            local stats = gen:FindFirstChild("Stats")
+            if stats then
+                totalGens = totalGens + 1
+                local completed = stats:FindFirstChild("Completed") and stats.Completed.Value
+                if not completed then
+                    uncompletedCount = uncompletedCount + 1
+                end
+            end
+        end
+    end
+
+    if totalGens == 0 then return false, -1, -1 end
+
+    local curGenUI, totGenUI = getMachineProgress()
+    if curGenUI ~= -1 and totGenUI ~= -1 and totGenUI > 0 then
+        return (curGenUI >= totGenUI), curGenUI, totGenUI
+    end
+    return (uncompletedCount == 0), (totalGens - uncompletedCount), totalGens
+end
+
+-- ==============================================================================
+-- SECTION 4: NOCLIP SYSTEM, FLOOR LEVELING & THICK COLLIDER FILTERING
+-- ==============================================================================
+local function isColliderName(n)
+    return n == "NoClip" or n == "NoClip_Collider" or n == "CylinderCollider"
+end
+
+local function isFloorPart(p)
+    if not p or not p:IsA("BasePart") then return true end
+    local ln = p.Name:lower()
+    if ln:find("floor") or ln:find("ground") or ln:find("baseplate") or ln:find("carpet") then
+        return true
+    end
+    if p.Size.Y < 2.5 and p.Size.X > 25 and p.Size.Z > 25 and rootPart and p.Position.Y < (rootPart.Position.Y - 1.5) then
+        return true
+    end
+    return false
+end
+
+local function getSafeWalkY(referenceY)
+    if rootPart and rootPart.Position.Y > -50 and rootPart.Position.Y < 200 then
+        return rootPart.Position.Y
+    end
+    return referenceY or 100
+end
+
+local function getTargetStandingY(rawTargetY, isAlreadyStandingHeight)
+    local walkY = getSafeWalkY(rawTargetY)
+    if not rawTargetY then return walkY end
+    local standY = isAlreadyStandingHeight and rawTargetY or (rawTargetY + 3.0)
+    if math.abs(standY - walkY) <= 1.8 then
+        return walkY
+    end
+    return standY
+end
+
+local function clampPositionAboveFloor(pt, minHeightOffset)
+    if Config.UndergroundTeleport then return pt end
+    local walkY = getSafeWalkY(pt.Y)
+    if math.abs(pt.Y - walkY) <= 1.8 then
+        return Vector3.new(pt.X, walkY, pt.Z)
+    end
+    return Vector3.new(pt.X, pt.Y, pt.Z)
+end
+
+local function isWallOrGenBlockerName(n)
+    local ln = n:lower()
+    return n == "Wall"
+        or n == "WindowWall"
+        or n == "DoorWall"
+        or n == "WallFiller"
+        or n == "InvisBlock"
+        or n == "BaseMachine"
+        or n == "Cutouts"
+        or n == "DandyCutout"
+        or n == "Cutout_Dandy"
+        or n == "AnimatorDesk_Large"
+        or ln:find("cutout") ~= nil
+end
+
+local function isValidThickHideCollider(col)
+    if not col or not col:IsA("BasePart") then return false end
+    local n = col.Name
+    if n ~= "NoClip_Collider" and n ~= "CylinderCollider" then
+        return false
+    end
+
+    local parent = col.Parent
+    while parent and parent ~= Workspace and parent.Name ~= "CurrentRoom" do
+        local pn = parent.Name:lower()
+        if pn:find("wall") or pn:find("window") or pn:find("door") or pn:find("railing")
+           or pn:find("fence") or pn:find("barrier") or pn:find("border") or pn:find("pillar") then
+            return false
+        end
+        parent = parent.Parent
+    end
+
+    local wSize    = getWorldBoxSize(col)
+    local minHoriz = math.min(wSize.X, wSize.Z)
+    local maxHoriz = math.max(wSize.X, wSize.Z)
+
+    if minHoriz < Config.MinHideThickness then
+        return false
+    end
+
+    if (maxHoriz / math.max(minHoriz, 0.1)) > 5.5 and minHoriz < 4.5 then
+        return false
+    end
+
+    return true
+end
+
+local function updateColliderCaches()
+    local allC, hideC, espList, noclipList = {}, {}, {}, {}
+    local seenPart, seenESP, seenNoClip    = {}, {}, {}
+    local room = Workspace:FindFirstChild("CurrentRoom")
+    local map  = getMap()
+
+    local function addObstaclePart(p)
+        if p and p:IsA("BasePart") and not seenPart[p] and not isFloorPart(p) then
+            seenPart[p] = true
+            table.insert(allC, p)
+        end
+    end
+
+    local function addESPTarget(obj, labelText)
+        if obj and not seenESP[obj] then
+            seenESP[obj] = true
+            table.insert(espList, { adornee = obj, label = labelText })
+        end
+    end
+
+    local function addNoClipPart(p)
+        if p and p:IsA("BasePart") and not seenNoClip[p] and not isFloorPart(p) then
+            seenNoClip[p] = true
+            table.insert(noclipList, p)
+        end
+    end
+
+    local function addNoClipObjectAndDescendants(obj)
+        if not obj or obj == room or obj == map then return end
+        if obj:IsA("BasePart") then addNoClipPart(obj) end
+        for _, child in ipairs(obj:GetDescendants()) do
+            if child:IsA("BasePart") then addNoClipPart(child) end
+        end
+    end
+
+    if room then
+        for _, v in ipairs(room:GetDescendants()) do
+            local vName = v.Name
+            if isColliderName(vName) then
+                if v:IsA("BasePart") then
+                    addObstaclePart(v)
+                    local pName = v.Parent and v.Parent.Name or ""
+                    addESPTarget(v, pName ~= "" and (pName .. " > " .. vName) or vName)
+                    if isValidThickHideCollider(v) then
+                        table.insert(hideC, v)
+                    end
+                end
+                addNoClipObjectAndDescendants(v)
+                local parentObj = v.Parent
+                if parentObj and parentObj ~= room and parentObj ~= map and (parentObj:IsA("Model") or parentObj:IsA("BasePart")) then
+                    addNoClipObjectAndDescendants(parentObj)
+                end
+            elseif isWallOrGenBlockerName(vName) then
+                addNoClipObjectAndDescendants(v)
+                if vName == "InvisBlock" and v.Parent and v.Parent:IsA("Model") and v.Parent ~= room and v.Parent ~= map then
+                    addNoClipObjectAndDescendants(v.Parent)
+                end
+                if vName == "WindowWall" and (v:IsA("Model") or v:IsA("BasePart")) then
+                    local hasSubCollider = false
+                    for _, d in ipairs(v:GetDescendants()) do
+                        if d:IsA("BasePart") and isColliderName(d.Name) then
+                            hasSubCollider = true
+                            break
+                        end
+                    end
+                    if not hasSubCollider then
+                        addESPTarget(v, "WindowWall")
+                    end
+                    if v:IsA("BasePart") then
+                        addObstaclePart(v)
+                    else
+                        local bestPart, maxVol = nil, -1
+                        for _, d in ipairs(v:GetDescendants()) do
+                            if d:IsA("BasePart") and (d.Name == "Window" or d.Name == "Part") then
+                                local vol = d.Size.X * d.Size.Y * d.Size.Z
+                                if vol > maxVol then
+                                    maxVol   = vol
+                                    bestPart = d
+                                end
+                            end
+                        end
+                        if bestPart then addObstaclePart(bestPart) end
+                    end
+                end
+            end
+        end
+    end
+
+    cachedAllCols     = allC
+    cachedHideCols    = hideC
+    cachedESPAdornees = espList
+    cachedNoClipParts = noclipList
+end
+
+local function getNoClipColliders()
+    if #cachedAllCols == 0 then updateColliderCaches() end
+    return cachedAllCols
+end
+
+local function getAllNoClipTargetParts()
+    if #cachedNoClipParts == 0 then updateColliderCaches() end
+    return cachedNoClipParts
+end
+
+local function applyNoClipState()
+    if Config.NoClip then
+        for _, p in ipairs(getAllNoClipTargetParts()) do
+            if p and p.Parent then
+                if originalCollideStates[p] == nil then
+                    originalCollideStates[p] = p.CanCollide
+                end
+                p.CanCollide = false
+            end
+        end
+    else
+        for p, origState in pairs(originalCollideStates) do
+            if p and p.Parent then
+                p.CanCollide = origState
+            end
+        end
+        table.clear(originalCollideStates)
+    end
+end
+
+local function setTargetColliderPassable(targetCol, passable)
+    if passable and targetCol and targetCol.Parent then
+        forceCharNoClip = true
+        local room = Workspace:FindFirstChild("CurrentRoom")
+        local map  = getMap()
+
+        local function disablePart(p)
+            if p and p:IsA("BasePart") and not isFloorPart(p) then
+                if tempHideCollideStates[p] == nil then
+                    tempHideCollideStates[p] = p.CanCollide
+                end
+                p.CanCollide = false
+            end
+        end
+
+        disablePart(targetCol)
+        local parentObj = targetCol.Parent
+        if parentObj and parentObj ~= room and parentObj ~= map then
+            if parentObj:IsA("BasePart") then disablePart(parentObj) end
+            for _, d in ipairs(parentObj:GetDescendants()) do
+                disablePart(d)
+            end
+        end
+
+        local ok, overlapping = pcall(function()
+            local ovParams = OverlapParams.new()
+            ovParams.FilterType = Enum.RaycastFilterType.Exclude
+            ovParams.FilterDescendantsInstances = { character }
+            local wSz = getWorldBoxSize(targetCol)
+            return Workspace:GetPartBoundsInBox(CFrame.new(targetCol.Position), wSz + Vector3.new(2.5, 1.0, 2.5), ovParams)
+        end)
+        if ok and overlapping then
+            for _, p in ipairs(overlapping) do
+                disablePart(p)
+            end
+        end
+    elseif not passable then
+        forceCharNoClip = false
+        if not Config.NoClip then
+            for p, orig in pairs(tempHideCollideStates) do
+                if p and p.Parent then p.CanCollide = orig end
+            end
+        end
+        table.clear(tempHideCollideStates)
+    end
+end
+
+task.spawn(function()
+    while _G.TeleportGUI_Loaded do
+        updateColliderCaches()
+        if Config.NoClip and not isPathfinding then
+            applyNoClipState()
+        end
+        task.wait(1.2)
+    end
+    Config.NoClip = false
+    applyNoClipState()
+end)
+
+-- ==============================================================================
+-- SECTION 5: 1-LAYER PENETRATION ANALYZER & MONSTER DETECTION
+-- ==============================================================================
+local function isLooseMonsterName(mName)
+    if not mName then return false end
+    local lower = mName:lower()
+    for _, looseName in ipairs(Config.LooseMonsters or {}) do
+        if mName == looseName or lower:find(looseName:lower(), 1, true) then
+            return true
+        end
+    end
+    if lower:find("blott") or lower:find("squirm") or lower:find("razzle") or lower:find("rodger") or lower:find("connie") or lower:find("gourdy") then
+        return true
+    end
+    return false
+end
+
+local function isLethalMonsterName(mName)
+    if not mName then return false end
+    for _, lethalName in ipairs(Config.AvoidmoreradiusMonsters or {}) do
+        if mName == lethalName then
+            return true
+        end
+    end
+    return false
+end
+
+local function isThreatened()
+    local pGui        = player:FindFirstChild("PlayerGui")
+    local screenGui   = pGui and pGui:FindFirstChild("ScreenGui")
+    local monsterIcon = screenGui and screenGui:FindFirstChild("MonsterIcon")
+    if monsterIcon and monsterIcon.Visible and type(monsterIcon.ImageTransparency) == "number" and monsterIcon.ImageTransparency < 0.99 then
+        return true
+    end
+
+    if not rootPart then return false end
+    local map = getMap()
+    local monstersFolder = map and map:FindFirstChild("Monsters")
+    if monstersFolder then
+        for _, monster in pairs(monstersFolder:GetChildren()) do
+            if monster:IsA("Model") then
+                local chasing = monster:FindFirstChild("ChasingValue")
+                if chasing and chasing.Value == character then
+                    return true
+                end
+                local primaryPart = getMonsterPart(monster)
+                if primaryPart then
+                    local dist = (primaryPart.Position - rootPart.Position).Magnitude
+                    if isLethalMonsterName(monster.Name) then
+                        if dist <= (Config.LethalRadius or 60) then
+                            return true
+                        end
+                    elseif not isLooseMonsterName(monster.Name) then
+                        if dist <= Config.MonsterDangerRadius then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function isPointNearPassiveMonster(pt, customRadius)
+    local map = getMap()
+    local monstersFolder = map and map:FindFirstChild("Monsters")
+    if not monstersFolder then return false end
+    local checkRad = customRadius or (Config.LooseRadius or 10)
+    for _, m in pairs(monstersFolder:GetChildren()) do
+        if m:IsA("Model") and isLooseMonsterName(m.Name) then
+            local p = getMonsterPart(m)
+            if p and (p.Position - pt).Magnitude <= checkRad then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- [FITUR BARU] Mengecek apakah suatu titik item atau jalur ke item sedang berbahaya karena ada Monster (Aktif maupun Pasif)
+local function isItemAreaDangerous(itemPos)
+    local map = getMap()
+    local monstersFolder = map and map:FindFirstChild("Monsters")
+    if not monstersFolder then return false end
+
+    local activeSafeDist = math.max(Config.ItemMonsterSafeDist or 26, (Config.MonsterDangerRadius or 20) + 4)
+    local passiveSafeDist = math.max((Config.LooseRadius or 10) - 1, 8.5)
+
+    for _, m in pairs(monstersFolder:GetChildren()) do
+        if m:IsA("Model") then
+            local mp = getMonsterPart(m)
+            if mp then
+                local distToItem = Vector2.new(mp.Position.X - itemPos.X, mp.Position.Z - itemPos.Z).Magnitude
+                if isLethalMonsterName(m.Name) then
+                    if distToItem <= (Config.LethalRadius or 60) then
+                        return true
+                    end
+                elseif isLooseMonsterName(m.Name) then
+                    if distToItem <= passiveSafeDist then
+                        return true
+                    end
+                else
+                    if distToItem <= activeSafeDist then
+                        return true
+                    end
+                    -- Cek juga apakah monster aktif berada tepat di tengah jalur antara kita dan item tersebut
+                    if rootPart then
+                        local pA = rootPart.Position
+                        local ab = itemPos - pA
+                        local lenSq = ab.X * ab.X + ab.Z * ab.Z
+                        if lenSq > 1 then
+                            local t = math.clamp(((mp.Position.X - pA.X) * ab.X + (mp.Position.Z - pA.Z) * ab.Z) / lenSq, 0, 1)
+                            local closestPt = pA + ab * t
+                            local distToLine = Vector2.new(closestPt.X - mp.Position.X, closestPt.Z - mp.Position.Z).Magnitude
+                            if distToLine <= (Config.MonsterDangerRadius or 20) + 2 then
+                                return true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function getMinDistanceToMonsters(pt)
+    local minDist = math.huge
+    local map = getMap()
+    local monstersFolder = map and map:FindFirstChild("Monsters")
+    if monstersFolder then
+        for _, m in pairs(monstersFolder:GetChildren()) do
+            if m:IsA("Model") then
+                local p = getMonsterPart(m)
+                if p then
+                    local d = (p.Position - pt).Magnitude
+                    if d < minDist then minDist = d end
+                end
+            end
+        end
+    end
+    return minDist
+end
+
+local function isPointInsideExpandedBox(pt, part, marginXZ, marginY)
+    if not part or not part:IsA("BasePart") then return false end
+    marginXZ  = marginXZ or 0
+    marginY   = marginY or marginXZ
+    local lPt = part.CFrame:PointToObjectSpace(pt)
+    return math.abs(lPt.X) <= (part.Size.X * 0.5 + marginXZ)
+       and math.abs(lPt.Y) <= (part.Size.Y * 0.5 + marginY)
+       and math.abs(lPt.Z) <= (part.Size.Z * 0.5 + marginXZ)
+end
+
+local function segmentIntersectsExpandedBox(posA, posB, part, padXZ, padY)
+    if not part or not part:IsA("BasePart") then return false, nil, nil end
+    padXZ = padXZ or 1.4
+    padY  = padY or 1.8
+
+    local cf = part.CFrame
+    local lA = cf:PointToObjectSpace(posA)
+    local lB = cf:PointToObjectSpace(posB)
+    local d  = lB - lA
+
+    local hx = part.Size.X * 0.5 + padXZ
+    local hy = part.Size.Y * 0.5 + padY
+    local hz = part.Size.Z * 0.5 + padXZ
+
+    local tMin, tMax = 0.0, 1.0
+
+    if math.abs(d.X) < 1e-6 then
+        if math.abs(lA.X) > hx then return false, nil, nil end
+    else
+        local inv = 1.0 / d.X
+        local t1, t2 = (-hx - lA.X) * inv, (hx - lA.X) * inv
+        if t1 > t2 then t1, t2 = t2, t1 end
+        if t1 > tMin then tMin = t1 end
+        if t2 < tMax then tMax = t2 end
+        if tMin > tMax then return false, nil, nil end
+    end
+
+    if math.abs(d.Y) < 1e-6 then
+        if math.abs(lA.Y) > hy then return false, nil, nil end
+    else
+        local inv = 1.0 / d.Y
+        local t1, t2 = (-hy - lA.Y) * inv, (hy - lA.Y) * inv
+        if t1 > t2 then t1, t2 = t2, t1 end
+        if t1 > tMin then tMin = t1 end
+        if t2 < tMax then tMax = t2 end
+        if tMin > tMax then return false, nil, nil end
+    end
+
+    if math.abs(d.Z) < 1e-6 then
+        if math.abs(lA.Z) > hz then return false, nil, nil end
+    else
+        local inv = 1.0 / d.Z
+        local t1, t2 = (-hz - lA.Z) * inv, (hz - lA.Z) * inv
+        if t1 > t2 then t1, t2 = t2, t1 end
+        if t1 > tMin then tMin = t1 end
+        if t2 < tMax then tMax = t2 end
+        if tMin > tMax then return false, nil, nil end
+    end
+
+    return (tMin <= tMax), tMin, tMax
+end
+
+local function segmentHitsPassiveMonster(posA, posB)
+    local map = getMap()
+    local monstersFolder = map and map:FindFirstChild("Monsters")
+    if not monstersFolder then return false end
+    local looseRad = Config.LooseRadius or 10
+    for _, m in pairs(monstersFolder:GetChildren()) do
+        if m:IsA("Model") and isLooseMonsterName(m.Name) then
+            local p = getMonsterPart(m)
+            if p then
+                local ab = posB - posA
+                local lenSq = ab.X * ab.X + ab.Z * ab.Z
+                local t = 0
+                if lenSq > 1e-4 then
+                    t = math.clamp(((p.Position.X - posA.X) * ab.X + (p.Position.Z - posA.Z) * ab.Z) / lenSq, 0, 1)
+                end
+                local closestPt = posA + ab * t
+                local horizDist = Vector2.new(closestPt.X - p.Position.X, closestPt.Z - p.Position.Z).Magnitude
+                if horizDist <= looseRad then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function getColliderGroupKey(col)
+    if not col then return nil end
+    local room = Workspace:FindFirstChild("CurrentRoom")
+    local map  = getMap()
+    local p    = col.Parent
+    if p and p:IsA("Model") and p ~= room and p ~= map then
+        return p
+    end
+    return col
+end
+
+local function analyzeSegmentLayers(posA, posB, ignoredCol, padXZ)
+    padXZ = padXZ or 1.35
+    if segmentHitsPassiveMonster(posA, posB) then
+        return false, 99, nil
+    end
+
+    local allCols      = getNoClipColliders()
+    local ignoredGroup = getColliderGroupKey(ignoredCol)
+    local totalDist    = (posB - posA).Magnitude
+    local hitGroups    = {}
+    local groupList    = {}
+
+    local minX = math.min(posA.X, posB.X) - 12.0
+    local maxX = math.max(posA.X, posB.X) + 12.0
+    local minZ = math.min(posA.Z, posB.Z) - 12.0
+    local maxZ = math.max(posA.Z, posB.Z) + 12.0
+
+    for _, col in ipairs(allCols) do
+        if col and col.Parent and col ~= ignoredCol then
+            local cPos = col.Position
+            if cPos.X >= minX and cPos.X <= maxX and cPos.Z >= minZ and cPos.Z <= maxZ then
+                local gKey = getColliderGroupKey(col)
+                if gKey ~= ignoredGroup then
+                    local hit, tMin, tMax = segmentIntersectsExpandedBox(posA, posB, col, padXZ, 1.6)
+                    if hit and tMin and tMax then
+                        local existing = hitGroups[gKey]
+                        if not existing then
+                            existing = { col = col, tMin = tMin, tMax = tMax }
+                            hitGroups[gKey] = existing
+                            table.insert(groupList, existing)
+                        else
+                            if tMin < existing.tMin then existing.tMin = tMin end
+                            if tMax > existing.tMax then existing.tMax = tMax end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local numLayers = #groupList
+    if numLayers == 0 then
+        return true, 0, nil
+    elseif numLayers == 1 then
+        local g = groupList[1]
+        local thicknessThrough = (g.tMax - g.tMin) * totalDist
+        if thicknessThrough <= 14.5 then
+            return true, 1, g.col
+        else
+            return false, 2, g.col
+        end
+    else
+        return false, numLayers, groupList[1].col
+    end
+end
+
+local function countCollidersHitBySegment(posA, posB, ignoredCol, padXZ)
+    local _, layerCount = analyzeSegmentLayers(posA, posB, ignoredCol, padXZ or 1.45)
+    return layerCount
+end
+
+local function isPointStrictlyOpenAir(pt, marginXZ)
+    marginXZ = marginXZ or 1.5
+    if isPointNearPassiveMonster(pt, Config.LooseRadius or 10) then
+        return false
+    end
+    for _, col in ipairs(getNoClipColliders()) do
+        if col and col.Parent and isPointInsideExpandedBox(pt, col, marginXZ, 1.6) then
+            return false
+        end
+    end
+    return true
+end
+
+local function findSafeExitPointOutsideCollider(fromPos, centerPos, targetCol)
+    local walkY = getSafeWalkY(centerPos.Y)
+    local dir = fromPos - centerPos
+    dir = Vector3.new(dir.X, 0, dir.Z)
+    local baseDir = (dir.Magnitude > 0.1) and dir.Unit or Vector3.new(1, 0, 0)
+    local perpDir = Vector3.new(-baseDir.Z, 0, baseDir.X)
+    local wSz     = getWorldBoxSize(targetCol)
+    local radius  = math.max(wSz.X, wSz.Z) * 0.5 + 3.6
+
+    local dirs = {
+        baseDir, perpDir, -perpDir, -baseDir,
+        (baseDir + perpDir).Unit, (baseDir - perpDir).Unit,
+        (-baseDir + perpDir).Unit, (-baseDir - perpDir).Unit,
+    }
+
+    for _, d in ipairs(dirs) do
+        for extra = 0, 9, 3 do
+            local candidate = Vector3.new(centerPos.X, walkY, centerPos.Z) + d * (radius + extra)
+            if isPointStrictlyOpenAir(candidate, 1.6) then
+                if countCollidersHitBySegment(centerPos, candidate, targetCol, 1.45) == 0 then
+                    return candidate
+                end
+            end
+        end
+    end
+    return Vector3.new(fromPos.X, walkY, fromPos.Z)
+end
+
+local function buildSmartOneLayerRoute(startPos, goalPos, allowedGoalCol)
+    local walkY  = getSafeWalkY(startPos.Y)
+    local goalY  = getTargetStandingY(goalPos.Y, true)
+    local pStart = Vector3.new(startPos.X, walkY, startPos.Z)
+    local pGoal  = Vector3.new(goalPos.X, goalY, goalPos.Z)
+
+    local okDirect, _, hitCol = analyzeSegmentLayers(pStart, pGoal, allowedGoalCol, 1.35)
+    if okDirect then
+        return { pGoal }, true, hitCol
+    end
+
+    local dir = pGoal - pStart
+    local flatDir = Vector3.new(dir.X, 0, dir.Z)
+    local uDir = (flatDir.Magnitude > 0.1) and flatDir.Unit or Vector3.new(1, 0, 0)
+    local perp = Vector3.new(-uDir.Z, 0, uDir.X)
+
+    local openNodes = {}
+    for _, clearanceMargin in ipairs({ 3.8, 2.0 }) do
+        if #openNodes >= 10 then break end
+        for _, frac in ipairs({ 0.5, 0.25, 0.75 }) do
+            if #openNodes >= 10 then break end
+            local basePt = pStart:Lerp(pGoal, frac)
+            for _, offsetDist in ipairs({ 8.0, 14.0, 21.0, 29.0 }) do
+                if #openNodes >= 10 then break end
+                for _, side in ipairs({ 1, -1 }) do
+                    local pt = Vector3.new(basePt.X, walkY, basePt.Z) + (perp * (offsetDist * side))
+                    if isPointStrictlyOpenAir(pt, clearanceMargin) then
+                        local isBad = false
+                        for _, badPos in ipairs(failedRollbackZones) do
+                            if (pt - badPos).Magnitude < 4.5 then isBad = true; break end
+                        end
+                        if not isBad then
+                            table.insert(openNodes, pt)
+                            if #openNodes >= 10 then break end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local startInfo = {}
+    local goalInfo  = {}
+    for idx, n in ipairs(openNodes) do
+        local ok1, l1, c1 = analyzeSegmentLayers(pStart, n, nil, 1.35)
+        local ok2, l2, c2 = analyzeSegmentLayers(n, pGoal, allowedGoalCol, 1.35)
+        startInfo[idx] = { ok = ok1, layers = l1, col = c1 }
+        goalInfo[idx]  = { ok = ok2, layers = l2, col = c2 }
+    end
+
+    for maxAllowedLayer = 0, 1 do
+        local bestRoute, bestDist, bestCol = nil, math.huge, nil
+        for idx, n1 in ipairs(openNodes) do
+            local s = startInfo[idx]
+            local g = goalInfo[idx]
+            if s.ok and g.ok and (s.layers + g.layers) <= maxAllowedLayer then
+                local d = (n1 - pStart).Magnitude + (pGoal - n1).Magnitude
+                if d < bestDist then
+                    bestDist  = d
+                    bestRoute = { n1, pGoal }
+                    bestCol   = s.col or g.col
+                end
+            end
+        end
+        if bestRoute then
+            return bestRoute, true, bestCol
+        end
+    end
+
+    for idx1, n1 in ipairs(openNodes) do
+        local s1 = startInfo[idx1]
+        if s1.ok and s1.layers == 0 then
+            for idx2, n2 in ipairs(openNodes) do
+                local g2 = goalInfo[idx2]
+                if idx1 ~= idx2 and g2.ok and g2.layers <= 1 then
+                    local okMid, lMid = analyzeSegmentLayers(n1, n2, nil, 1.35)
+                    if okMid and lMid == 0 then
+                        return { n1, n2, pGoal }, true, g2.col
+                    end
+                end
+            end
+        end
+    end
+
+    return { pGoal }, false, nil
+end
+
+local function getNearestSafeColliderRoute(startPos, excludedCol)
+    if #cachedHideCols == 0 then
+        updateColliderCaches()
+    end
+    local hideableCols = cachedHideCols
+    local walkY        = getSafeWalkY(startPos.Y)
+    local cleanStart   = Vector3.new(startPos.X, walkY, startPos.Z)
+
+    if #hideableCols == 0 then
+        return { waypoints = { cleanStart }, targetCol = nil, centerPos = cleanStart, exitPos = cleanStart }
+    end
+
+    local preCandidates = {}
+    local safeThreshold = math.max(Config.MonsterDangerRadius, 12.0)
+    for _, col in ipairs(hideableCols) do
+        if col and col.Parent and col ~= excludedCol then
+            local cPos        = col.Position
+            local center      = Vector3.new(cPos.X, walkY, cPos.Z)
+            local monsterDist = getMinDistanceToMonsters(center)
+            table.insert(preCandidates, {
+                col         = col,
+                centerPos   = center,
+                dist        = (center - cleanStart).Magnitude,
+                SafeFromMob = (monsterDist > safeThreshold),
+            })
+        end
+    end
+
+    if #preCandidates == 0 then
+        return { waypoints = { cleanStart }, targetCol = nil, centerPos = cleanStart, exitPos = cleanStart }
+    end
+
+    table.sort(preCandidates, function(a, b)
+        if a.SafeFromMob ~= b.SafeFromMob then return a.SafeFromMob end
+        return a.dist < b.dist
+    end)
+
+    local candidates = {}
+    local maxInspect = math.min(#preCandidates, 8)
+    for i = 1, maxInspect do
+        local pc = preCandidates[i]
+        local touchesAdjacentObject = (countCollidersHitBySegment(pc.centerPos, pc.centerPos, pc.col, 1.6) > 0)
+        pc.isIsolated = not touchesAdjacentObject
+        table.insert(candidates, pc)
+    end
+
+    table.sort(candidates, function(a, b)
+        if a.SafeFromMob ~= b.SafeFromMob then return a.SafeFromMob end
+        if a.isIsolated ~= b.isIsolated then return a.isIsolated end
+        return a.dist < b.dist
+    end)
+
+    for _, cand in ipairs(candidates) do
+        if cand.isIsolated then
+            local ok1Layer = analyzeSegmentLayers(cleanStart, cand.centerPos, cand.col, 1.45)
+            if ok1Layer then
+                local exitPt = findSafeExitPointOutsideCollider(cleanStart, cand.centerPos, cand.col)
+                return { waypoints = { cand.centerPos }, targetCol = cand.col, centerPos = cand.centerPos, exitPos = exitPt }
+            end
+        end
+    end
+
+    local detourTries = 0
+    for _, cand in ipairs(candidates) do
+        if cand.isIsolated then
+            detourTries = detourTries + 1
+            local routeWps, okRoute = buildSmartOneLayerRoute(cleanStart, cand.centerPos, cand.col)
+            if okRoute and #routeWps > 0 then
+                local lastBeforeCenter = (#routeWps >= 2) and routeWps[#routeWps - 1] or cleanStart
+                local exitPt = findSafeExitPointOutsideCollider(lastBeforeCenter, cand.centerPos, cand.col)
+                return { waypoints = routeWps, targetCol = cand.col, centerPos = cand.centerPos, exitPos = exitPt }
+            end
+            if detourTries >= 2 then break end
+        end
+    end
+
+    local best = candidates[1]
+    local exitPt = findSafeExitPointOutsideCollider(cleanStart, best.centerPos, best.col)
+    return { waypoints = { best.centerPos }, targetCol = best.col, centerPos = best.centerPos, exitPos = exitPt }
+end
+
+-- ==============================================================================
+-- SECTION 6: TELEPORT, 1-LAYER + NAVMESH PATHFINDING & HYBRID Y-BYPASS ENGINE
+-- ==============================================================================
+local pathfindTween
+local performColliderHide
+local activeHoldConns = {}
+
+local function clearPathVisuals()
+    for _, v in ipairs(pathVisuals) do pcall(function() v:Destroy() end) end
+    pathVisuals = {}
+end
+
+local function drawWaypoint(pos, color)
+    if #pathVisuals >= 40 then return end
+    local p = Instance.new("Part")
+    p.Size       = Vector3.new(0.35, 0.35, 0.35)
+    p.Shape      = Enum.PartType.Ball
+    p.Anchored   = true
+    p.CanCollide = false
+    p.Material   = Enum.Material.Neon
+    p.Color      = color or Color3.fromRGB(255, 200, 0)
+    p.CFrame     = CFrame.new(pos)
+    p.Parent     = Workspace
+    table.insert(pathVisuals, p)
+end
+
+local function clearAllServerSyncedHolds()
+    for _, c in ipairs(activeHoldConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    table.clear(activeHoldConns)
+end
+
+local function startServerSyncedHold(getTargetPosFn)
+    clearAllServerSyncedHolds()
+    if rootPart then rootPart.Anchored = false end
+    Workspace.Gravity = 0
+    local tickCounter = 0
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not rootPart or abortTeleport or not _G.TeleportGUI_Loaded or (not isHiding and not isPickingUp) then
+            if conn then conn:Disconnect() end
+            return
+        end
+        local holdPos = getTargetPosFn()
+        if not holdPos then return end
+        if (rootPart.Position - holdPos).Magnitude <= 3.5 then
+            tickCounter = tickCounter + 1
+            local jitterX = (tickCounter % 2 == 0) and 0.03 or -0.03
+            local jitterZ = (tickCounter % 4 < 2) and 0.03 or -0.03
+            rootPart.AssemblyLinearVelocity  = Vector3.zero
+            rootPart.AssemblyAngularVelocity = Vector3.zero
+            rootPart.CFrame = CFrame.new(holdPos.X + jitterX, holdPos.Y, holdPos.Z + jitterZ)
+        end
+    end)
+    table.insert(activeHoldConns, conn)
+    return conn
+end
+
+local function recordFailedRollbackZone(pos)
+    if not pos then return end
+    for _, p in ipairs(failedRollbackZones) do
+        if (p - pos).Magnitude < 4.0 then return end
+    end
+    table.insert(failedRollbackZones, pos)
+    if #failedRollbackZones > 12 then
+        table.remove(failedRollbackZones, 1)
+    end
+end
+
+local function teleportInstant(cf, keepZeroGravity)
+    if not rootPart then return end
+    Workspace.Gravity = 0
+    rootPart.AssemblyLinearVelocity  = Vector3.zero
+    rootPart.AssemblyAngularVelocity = Vector3.zero
+    rootPart.CFrame = cf
+    character:PivotTo(cf)
+    if not keepZeroGravity and not isPathfinding and not isHiding then
+        restoreNormalGravity()
+    end
+end
+
+-- [OPTIMIZED] teleportTween dengan Throttled Obstacle Sensor & Custom Cancel Predicate (untuk Dynamic Reroute)
+local function teleportTween(cf, speed, ignoreThreat, forceSnapEnd, customCancelFn)
+    if not rootPart or not character then return false end
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    rootPart.Anchored = false
+
+    local targetPos    = cf.Position
+    local startPos     = rootPart.Position
+    local verticalDiff = math.abs(targetPos.Y - startPos.Y)
+
+    local baseSpd    = player:GetAttribute("KM_MAX_PLAYER_SPEED") or 27.5
+    local origWalk   = (hum and hum.WalkSpeed > 0) and hum.WalkSpeed or 16
+    local openMult   = speed or Config.TweenSpeed or 2.25
+    local noclipMult = Config.NoClipTweenSpeed or 1.05
+
+    local _, segLayers = analyzeSegmentLayers(startPos, targetPos, nil, 1.8)
+    local isSlopedStageMove = (verticalDiff > 1.8)
+    local isVerticalMove    = Config.UndergroundTeleport or isSlopedStageMove
+
+    local effectiveMult = (isSlopedStageMove and segLayers > 0) and math.min(openMult, noclipMult) or openMult
+    local moveSpd       = baseSpd * effectiveMult
+    local cancelled     = false
+
+    local sensorParams = OverlapParams.new()
+    sensorParams.FilterType = Enum.RaycastFilterType.Exclude
+    sensorParams.FilterDescendantsInstances = { character }
+
+    local function isTouchingOrApproachingObstacle(curPos, dirUnit)
+        local behindPos = curPos - (dirUnit * 2.5)
+        local midAhead  = curPos + (dirUnit * 3.0)
+        local farAhead  = curPos + (dirUnit * 5.8)
+
+        for _, col in ipairs(getNoClipColliders()) do
+            if col and col.Parent then
+                if isPointInsideExpandedBox(curPos, col, 4.2, 2.5)
+                   or isPointInsideExpandedBox(behindPos, col, 3.2, 2.5)
+                   or isPointInsideExpandedBox(midAhead, col, 4.2, 2.5)
+                   or isPointInsideExpandedBox(farAhead, col, 3.8, 2.5) then
+                    return true
+                end
+            end
+        end
+
+        local ok, parts = pcall(function()
+            return Workspace:GetPartBoundsInBox(CFrame.new(curPos + (dirUnit * 2.2)), Vector3.new(7.2, 3.0, 7.2), sensorParams)
+        end)
+        if ok and parts then
+            for _, p in ipairs(parts) do
+                if p and p:IsA("BasePart") and not isFloorPart(p) then
+                    local pn = p.Name
+                    if (pn ~= "_NoClipESP" and pn ~= "_LineESPBeam" and pn ~= "_PFVirtualBlocker" and p.Transparency < 0.98)
+                       or isColliderName(pn) or pn == "InvisBlock" then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+
+    forceCharNoClip = true
+    if Config.NoClip then applyNoClipState() end
+
+    if not isVerticalMove and hum then
+        restoreNormalGravity()
+        hum.PlatformStand = false
+        hum.Sit           = false
+        if hum:GetState() == Enum.HumanoidStateType.Freefall or hum:GetState() == Enum.HumanoidStateType.None then
+            hum:ChangeState(Enum.HumanoidStateType.Running)
+        end
+
+        local currentDir = Vector3.zero
+        local stepBindName = "_TeleportWalkSim"
+        pcall(function() RunService:UnbindFromRenderStep(stepBindName) end)
+
+        RunService:BindToRenderStep(stepBindName, Enum.RenderPriority.Character.Value + 10, function()
+            if rootPart and hum and hum.Parent and currentDir.Magnitude > 0.01 then
+                hum.WalkSpeed = moveSpd
+                hum:Move(currentDir, false)
+            end
+        end)
+
+        local totalDist          = Vector2.new(targetPos.X - startPos.X, targetPos.Z - startPos.Z).Magnitude
+        local minSpdEst          = baseSpd * math.min(openMult, noclipMult)
+        local timeoutClock       = os.clock() + math.max((totalDist / math.max(minSpdEst, 5)) * 3.0, 4.0)
+        local lastPos            = rootPart.Position
+        local stuckTimer         = 0
+        local lastObstacleClock  = 0
+        local lastSensorCheck    = 0
+        local cachedNearObstacle = false
+
+        while rootPart and hum and hum.Parent and os.clock() < timeoutClock do
+            if abortTeleport or (not ignoreThreat and isThreatened()) or (customCancelFn and customCancelFn()) then
+                cancelled = true
+                break
+            end
+
+            local curPos   = rootPart.Position
+            local flatDiff = Vector3.new(targetPos.X - curPos.X, 0, targetPos.Z - curPos.Z)
+            local dist     = flatDiff.Magnitude
+
+            if dist <= 1.6 then
+                break
+            end
+
+            currentDir = flatDiff.Unit
+
+            -- Throttle sensor GetPartBoundsInBox setiap 0.07s agar CPU sangat ringan
+            local now = os.clock()
+            if (now - lastSensorCheck) >= 0.07 then
+                lastSensorCheck    = now
+                cachedNearObstacle = isTouchingOrApproachingObstacle(curPos, currentDir)
+                if cachedNearObstacle then
+                    lastObstacleClock = now
+                end
+            end
+
+            if cachedNearObstacle or (now - lastObstacleClock) < 0.28 or dist <= 4.5 then
+                moveSpd = baseSpd * noclipMult
+            else
+                moveSpd = baseSpd * openMult
+            end
+
+            hum.WalkSpeed = moveSpd
+            hum:Move(currentDir, false)
+
+            local dt = RunService.Heartbeat:Wait()
+            if not rootPart then break end
+
+            if (rootPart.Position - lastPos).Magnitude < 0.08 then
+                stuckTimer = stuckTimer + dt
+                if stuckTimer > 0.25 then
+                    applyNoClipState()
+                    stuckTimer = 0
+                end
+            else
+                stuckTimer = 0
+                lastPos = rootPart.Position
+            end
+        end
+
+        currentDir = Vector3.zero
+        pcall(function() RunService:UnbindFromRenderStep(stepBindName) end)
+        if hum and hum.Parent then
+            hum:Move(Vector3.zero, false)
+            hum.WalkSpeed = origWalk
+        end
+    else
+        Workspace.Gravity = 0
+        local dist = (startPos - targetPos).Magnitude
+        local dur  = math.max(dist / math.max(moveSpd, 1), 0.001)
+        local tw   = TweenService:Create(rootPart, TweenInfo.new(dur, Enum.EasingStyle.Linear), { CFrame = cf })
+        activeTween = tw
+        tw:Play()
+
+        local done = false
+        tw.Completed:Connect(function(playbackState)
+            if playbackState == Enum.PlaybackState.Completed then done = true end
+        end)
+
+        while not done do
+            if abortTeleport or (not ignoreThreat and isThreatened()) or (customCancelFn and customCancelFn()) then
+                tw:Cancel()
+                cancelled = true
+                break
+            end
+            task.wait(0.015)
+        end
+
+        if not cancelled and rootPart and (rootPart.Position - targetPos).Magnitude <= 4.0 then
+            rootPart.CFrame = cf
+        end
+        if rootPart then rootPart.AssemblyLinearVelocity = Vector3.zero end
+        if activeTween == tw then activeTween = nil end
+    end
+
+    if not Config.NoClip and not isHiding then
+        forceCharNoClip = false
+    end
+    if not isPathfinding and not isHiding then
+        restoreNormalGravity()
+    end
+
+    return cancelled
+end
+
+local function moveIntoNearestColliderCenter(speed, ignoreThreat, excludedCol)
+    if not rootPart then return nil, nil end
+    rootPart.Anchored = false
+    local startPos  = clampPositionAboveFloor(rootPart.Position, 3.1)
+    local hideRoute = getNearestSafeColliderRoute(startPos, excludedCol)
+    local targetCol = hideRoute.targetCol
+
+    setTargetColliderPassable(targetCol, true)
+    local moveSpd = speed or math.max(Config.TweenSpeed, Config.UGRiseSpeed * 1.5)
+
+    for i, wpPos in ipairs(hideRoute.waypoints) do
+        if abortTeleport or not _G.TeleportGUI_Loaded then break end
+        local isLast = (i == #hideRoute.waypoints)
+        local cancelled = teleportTween(CFrame.new(wpPos), moveSpd, ignoreThreat, isLast)
+        if cancelled and not ignoreThreat then
+            return nil, hideRoute
+        end
+    end
+
+    if rootPart and hideRoute.centerPos and not abortTeleport then
+        if (rootPart.Position - hideRoute.centerPos).Magnitude <= 3.5 then
+            rootPart.CFrame = CFrame.new(hideRoute.centerPos)
+            character:PivotTo(CFrame.new(hideRoute.centerPos))
+        end
+    end
+    return hideRoute.centerPos, hideRoute
+end
+
+local function executeHybridYTeleport(targetCF, statusFn)
+    if not rootPart then return false end
+
+    if statusFn then statusFn("1/3 🛡 Menuju tengah Collider tebal terdekat...", Color3.fromRGB(255, 190, 80)) end
+    local centerPos = moveIntoNearestColliderCenter(Config.TweenSpeed, false)
+    if abortTeleport or not rootPart then
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+        return false
+    end
+
+    if not centerPos then
+        centerPos = moveIntoNearestColliderCenter(math.max(Config.TweenSpeed, Config.UGRiseSpeed * 1.5), true)
+    end
+    if not centerPos then centerPos = rootPart.Position end
+
+    task.wait(0.05)
+
+    local bypassY   = Config.HybridBypassY
+    local waitDelay = math.max(Config.HybridBypassDelay or 0.4, 0.05)
+    local bypassCF  = CFrame.new(centerPos.X, bypassY, centerPos.Z)
+
+    Workspace.Gravity = 0
+    teleportInstant(bypassCF, true)
+
+    local holdConn = RunService.Heartbeat:Connect(function()
+        if rootPart and not abortTeleport then
+            rootPart.AssemblyLinearVelocity  = Vector3.zero
+            rootPart.AssemblyAngularVelocity = Vector3.zero
+            rootPart.CFrame = bypassCF
+        end
+    end)
+
+    local elapsed = 0
+    while elapsed < waitDelay and not abortTeleport and _G.TeleportGUI_Loaded do
+        local remain = math.max(waitDelay - elapsed, 0)
+        if statusFn then
+            statusFn(string.format("2/3 ⏳ Stay di Y=%.0f (%.2fs)...", bypassY, remain), Color3.fromRGB(120, 220, 255))
+        end
+        local step = math.min(0.05, waitDelay - elapsed)
+        task.wait(step)
+        elapsed = elapsed + step
+    end
+
+    if holdConn then holdConn:Disconnect() end
+
+    if abortTeleport or not rootPart then
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+        return false
+    end
+
+    local destPos     = targetCF.Position
+    local finalDestCF = CFrame.new(destPos)
+    if statusFn then
+        statusFn(string.format("3/3 💥 Boom! Instant ke (%.0f, %.0f, %.0f)", destPos.X, destPos.Y, destPos.Z), Color3.fromRGB(100, 255, 160))
+    end
+    teleportInstant(finalDestCF, true)
+    task.wait(0.05)
+    teleportInstant(finalDestCF, false)
+
+    setTargetColliderPassable(nil, false)
+    restoreNormalGravity()
+    return true
+end
+
+local function safeSingleLayerTween(targetCF, speed, ignoreThreat, customCancelFn)
+    if not rootPart then return false end
+    local walkY    = getSafeWalkY(rootPart.Position.Y)
+    local goalY    = getTargetStandingY(targetCF.Position.Y, true)
+    local startPos = Vector3.new(rootPart.Position.X, walkY, rootPart.Position.Z)
+    local goalPos  = Vector3.new(targetCF.Position.X, goalY, targetCF.Position.Z)
+
+    local goalCol = nil
+    for _, col in ipairs(getNoClipColliders()) do
+        if col and col.Parent and isPointInsideExpandedBox(goalPos, col, 1.5, 2.0) then
+            goalCol = col
+            break
+        end
+    end
+
+    local routeWps, okOneLayer, penetratedCol = buildSmartOneLayerRoute(startPos, goalPos, goalCol)
+
+    if okOneLayer and #routeWps > 0 then
+        if penetratedCol then
+            setTargetColliderPassable(penetratedCol, true)
+        end
+        if goalCol then
+            setTargetColliderPassable(goalCol, true)
+        end
+        forceCharNoClip = true
+
+        local cancelled = false
+        for i, wp in ipairs(routeWps) do
+            if abortTeleport or not _G.TeleportGUI_Loaded then
+                cancelled = true
+                break
+            end
+            clearPathVisuals()
+            drawWaypoint(wp, (i == #routeWps) and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(80, 200, 255))
+            cancelled = teleportTween(CFrame.new(wp), speed or Config.TweenSpeed, ignoreThreat, true, customCancelFn)
+            if cancelled or abortTeleport then
+                break
+            end
+        end
+
+        clearPathVisuals()
+        setTargetColliderPassable(nil, false)
+
+        if abortTeleport then
+            return true
+        end
+
+        if cancelled then
+            if not isPickingUp and not ignoreThreat and isThreatened() then
+                local resumed = performColliderHide(function(txt, col)
+                    if pfStatusRef then pfStatusRef.Text = txt; pfStatusRef.TextColor3 = col or Color3.fromRGB(255, 180, 80) end
+                end)
+                if resumed and not abortTeleport and _G.TeleportGUI_Loaded then
+                    return safeSingleLayerTween(targetCF, speed, ignoreThreat, customCancelFn)
+                end
+            end
+            return true
+        end
+
+        task.wait(0.06)
+        if rootPart and (rootPart.Position - goalPos).Magnitude <= 6.5 then
+            return false
+        else
+            recordFailedRollbackZone(routeWps[1])
+        end
+    end
+
+    if not isPathfinding and not abortTeleport then
+        if pfStatusRef then
+            pfStatusRef.Text = "🔄 >=2 Lapis terdeteksi! Memutar tanpa tembus..."
+            pfStatusRef.TextColor3 = Color3.fromRGB(255, 190, 70)
+        end
+        pathfindTween(CFrame.new(goalPos), nil, 1, true)
+    end
+
+    return false
+end
+
+performColliderHide = function(statusFn)
+    if not rootPart then return false end
+    rootPart.Anchored = false
+    isHiding = true
+
+    local hideSpeed = math.max(Config.TweenSpeed, Config.UGRiseSpeed * 1.5)
+    local centerPos, hideRoute = moveIntoNearestColliderCenter(hideSpeed, true)
+    if abortTeleport or not _G.TeleportGUI_Loaded then
+        isHiding = false
+        clearAllServerSyncedHolds()
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+        return false
+    end
+
+    local targetCol    = hideRoute and hideRoute.targetCol
+    local pName        = (targetCol and targetCol.Parent and targetCol.Parent.Name) or (targetCol and targetCol.Name) or "Collider"
+    local finalHidePos = (rootPart and centerPos and (rootPart.Position - centerPos).Magnitude <= 4.5) and rootPart.Position or (centerPos or rootPart.Position)
+
+    local hidePlat = Instance.new("Part")
+    hidePlat.Size         = Vector3.new(10, 1, 10)
+    hidePlat.Anchored     = true
+    hidePlat.CanCollide   = true
+    hidePlat.Transparency = 1
+    hidePlat.CFrame       = CFrame.new(finalHidePos.X, finalHidePos.Y - 3, finalHidePos.Z)
+    hidePlat.Parent       = Workspace
+
+    local syncConn = startServerSyncedHold(function() return finalHidePos end)
+    local syncRetryCount = 0
+
+    local function verifyAndFixRealHidePosition()
+        if not rootPart or abortTeleport or not _G.TeleportGUI_Loaded or syncRetryCount >= 1 then return end
+        local desyncDist = (rootPart.Position - finalHidePos).Magnitude
+        if desyncDist > 4.5 then
+            syncRetryCount = syncRetryCount + 1
+            if syncConn then syncConn:Disconnect(); syncConn = nil end
+            if statusFn then statusFn("⚠ Sinkronisasi fisik ke tengah " .. pName .. "...", Color3.fromRGB(255, 160, 60)) end
+            setTargetColliderPassable(targetCol, true)
+            teleportTween(CFrame.new(finalHidePos), hideSpeed * 0.85, true, true)
+            if rootPart and not abortTeleport then
+                finalHidePos = rootPart.Position
+                syncConn = startServerSyncedHold(function() return finalHidePos end)
+            end
+        end
+    end
+
+    if statusFn then statusFn("🛡 Sembunyi di tengah " .. pName .. ", tunggu monster...", Color3.fromRGB(220, 80, 80)) end
+    local hideStartClock = os.clock()
+    while isThreatened() and (os.clock() - hideStartClock) < 20 and not abortTeleport and _G.TeleportGUI_Loaded do
+        verifyAndFixRealHidePosition()
+        if hidePlat and hidePlat.Parent and rootPart then
+            hidePlat.CFrame = CFrame.new(finalHidePos.X, finalHidePos.Y - 3, finalHidePos.Z)
+        end
+        task.wait(0.2)
+    end
+
+    if statusFn and not abortTeleport then
+        statusFn("⏳ Tunggu " .. Config.MonsterSafeDelay .. "s sebelum keluar collider...", Color3.fromRGB(180, 180, 60))
+    end
+    local safeStartClock = os.clock()
+    while (os.clock() - safeStartClock) < Config.MonsterSafeDelay and (os.clock() - hideStartClock) < 28 and not abortTeleport and _G.TeleportGUI_Loaded do
+        if isThreatened() then
+            if statusFn then statusFn("🛡 Monster kembali! Tetap di tengah " .. pName .. "...", Color3.fromRGB(220, 80, 80)) end
+            safeStartClock = os.clock()
+        end
+        task.wait(0.2)
+    end
+
+    clearAllServerSyncedHolds()
+    if hidePlat and hidePlat.Parent then hidePlat:Destroy() end
+    if rootPart then rootPart.Anchored = false end
+    isHiding = false
+
+    if abortTeleport or not _G.TeleportGUI_Loaded then
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+        return false
+    end
+
+    if not Config.HybridYMode then
+        if statusFn then statusFn("↩ Aman! Keluar ke ruang terbuka...", Color3.fromRGB(100, 220, 150)) end
+        if hideRoute and hideRoute.exitPos then
+            teleportTween(CFrame.new(hideRoute.exitPos), Config.TweenSpeed, true, true)
+        end
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+        task.wait(0.25)
+    else
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+    end
+
+    return true
+end
+
+pathfindTween = function(targetCF, statusCb, _attempt, skipFirstLayerTry)
+    if isPathfinding or not rootPart then return end
+    isPathfinding = true
+    abortTeleport = false
+    clearPathVisuals()
+    updateColliderCaches()
+
+    local function setStatus(txt, col)
+        if pfStatusRef then
+            pfStatusRef.Text       = txt
+            pfStatusRef.TextColor3 = col or Color3.fromRGB(160, 120, 255)
+        end
+        if statusCb then statusCb(txt) end
+    end
+
+    local walkY         = getSafeWalkY(rootPart.Position.Y)
+    local targetY       = getTargetStandingY(targetCF.Position.Y, true)
+    local startFlat     = Vector3.new(rootPart.Position.X, walkY, rootPart.Position.Z)
+    local computeTarget = Vector3.new(targetCF.Position.X, targetY, targetCF.Position.Z)
+    local attempt       = _attempt or 0
+    local comboMode     = Config.PathfindMode and Config.UndergroundTeleport
+
+    if attempt == 0 and not skipFirstLayerTry and not comboMode then
+        local goalCol = nil
+        for _, col in ipairs(cachedAllCols) do
+            if col and col.Parent and isPointInsideExpandedBox(computeTarget, col, 1.5, 2.0) then
+                goalCol = col
+                break
+            end
+        end
+
+        local okDirect, layerCount, hitCol = analyzeSegmentLayers(startFlat, computeTarget, goalCol, 1.35)
+        if okDirect and layerCount <= 1 then
+            setStatus("⚡ Jalur 1-Lapis aman! Tembus NoClip langsung...", Color3.fromRGB(100, 240, 160))
+            if hitCol then setTargetColliderPassable(hitCol, true) end
+            if goalCol then setTargetColliderPassable(goalCol, true) end
+            forceCharNoClip = true
+
+            drawWaypoint(computeTarget, Color3.fromRGB(0, 255, 120))
+            local isInterrupted = teleportTween(CFrame.new(computeTarget), Config.TweenSpeed, false, true)
+            clearPathVisuals()
+            setTargetColliderPassable(nil, false)
+
+            if isInterrupted and isThreatened() then
+                restoreNormalGravity()
+                local resumed = performColliderHide(setStatus)
+                isPathfinding = false
+                if resumed and not abortTeleport and _G.TeleportGUI_Loaded then
+                    pathfindTween(targetCF, statusCb, 1, true)
+                end
+                return
+            end
+
+            task.wait(0.06)
+            if rootPart and (rootPart.Position - computeTarget).Magnitude <= 5.5 then
+                isPathfinding = false
+                restoreNormalGravity()
+                setStatus("✔ Tembus 1-Lapis selesai!", Color3.fromRGB(100, 220, 150))
+                task.delay(1.5, function()
+                    if pfStatusRef then pfStatusRef.Text = "Aktif saat mode Tween / Hybrid dipilih" end
+                end)
+                return
+            else
+                setStatus("🔄 Tembus gagal (>=2 Lapis), beralih ke rute memutar...", Color3.fromRGB(255, 180, 60))
+            end
+        end
+    end
+
+    local currentParams = (attempt >= 2) and AGENT_PARAMS_LASTRESORT
+                       or (attempt == 1) and AGENT_PARAMS_FALLBACK
+                       or AGENT_PARAMS
+
+    for _, col in ipairs(cachedAllCols) do
+        if col and col:IsA("BasePart") then col.CanCollide = true end
+    end
+
+    local tempVirtualBlockers = {}
+    local map = getMap()
+    local monstersFolder = map and map:FindFirstChild("Monsters")
+    if monstersFolder then
+        local looseSize = (Config.LooseRadius or 10) * 1.9
+        for _, m in pairs(monstersFolder:GetChildren()) do
+            if m:IsA("Model") and isLooseMonsterName(m.Name) then
+                local mp = getMonsterPart(m)
+                if mp and rootPart and (mp.Position - rootPart.Position).Magnitude > 3.0 and (mp.Position - computeTarget).Magnitude > 4.0 then
+                    local mb = Instance.new("Part")
+                    mb.Name         = "_PFVirtualBlocker"
+                    mb.Size         = Vector3.new(looseSize, 12, looseSize)
+                    mb.Position     = mp.Position
+                    mb.Anchored     = true
+                    mb.CanCollide   = true
+                    mb.Transparency = 1
+                    mb.Parent       = Workspace
+                    table.insert(tempVirtualBlockers, mb)
+                end
+            end
+        end
+    end
+
+    local path = PathfindingService:CreatePath(currentParams)
+    local ok   = pcall(function() path:ComputeAsync(startFlat, computeTarget) end)
+
+    for _, vb in ipairs(tempVirtualBlockers) do
+        pcall(function() vb:Destroy() end)
+    end
+
+    if Config.NoClip then
+        applyNoClipState()
+    else
+        for _, col in ipairs(cachedAllCols) do
+            if col and col:IsA("BasePart") then col.CanCollide = true end
+        end
+    end
+
+    if not ok or path.Status ~= Enum.PathStatus.Success then
+        if attempt < 2 then
+            isPathfinding = false
+            task.wait(0.05)
+            pathfindTween(targetCF, statusCb, attempt + 1, true)
+            return
+        else
+            setStatus("⚠ Rute sempit, paksa gerak ke tujuan...", Color3.fromRGB(220, 140, 60))
+            forceCharNoClip = true
+            teleportTween(CFrame.new(computeTarget), Config.TweenSpeed, false, true)
+            forceCharNoClip = false
+            isPathfinding = false
+            restoreNormalGravity()
+            return
+        end
+    end
+
+    local rawWaypoints = path:GetWaypoints()
+    if #rawWaypoints == 0 then
+        isPathfinding = false
+        teleportTween(CFrame.new(computeTarget), Config.TweenSpeed, false, true)
+        restoreNormalGravity()
+        return
+    end
+
+    local flatWaypoints = {}
+    for i = 1, #rawWaypoints do
+        local rawY = rawWaypoints[i].Position.Y + 3.0
+        local wpHeight = (math.abs(rawY - walkY) <= 1.8) and walkY or rawY
+        table.insert(flatWaypoints, Vector3.new(rawWaypoints[i].Position.X, wpHeight, rawWaypoints[i].Position.Z))
+    end
+
+    local optimizedWps = {}
+    local curIdx = 1
+    while curIdx < #flatWaypoints do
+        local nextIdx = curIdx + 1
+        local maxAllowed = (attempt == 0) and 1 or 0
+        for j = #flatWaypoints, curIdx + 2, -1 do
+            local okSeg, segLayers = analyzeSegmentLayers(flatWaypoints[curIdx], flatWaypoints[j], nil, 1.4)
+            if okSeg and segLayers <= maxAllowed then
+                nextIdx = j
+                break
+            end
+        end
+        table.insert(optimizedWps, flatWaypoints[nextIdx])
+        curIdx = nextIdx
+    end
+
+    setStatus("🔵 Pathfinding (" .. #optimizedWps .. " titik)...", Color3.fromRGB(160, 120, 255))
+    Workspace.Gravity = 0
+
+    for i, wpPos in ipairs(optimizedWps) do
+        if abortTeleport or not _G.TeleportGUI_Loaded then
+            setStatus("🛑 Dibatalkan", Color3.fromRGB(220, 80, 80))
+            break
+        end
+
+        local wpY  = (comboMode or Config.UndergroundTeleport) and (wpPos.Y - Config.UGDepth) or wpPos.Y
+        local wpCF = CFrame.new(wpPos.X, wpY, wpPos.Z)
+
+        drawWaypoint(wpPos, i == #optimizedWps and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(255, 200, 0))
+
+        local isInterrupted = teleportTween(wpCF, Config.TweenSpeed, false, true)
+        if isInterrupted then
+            if isThreatened() then
+                restoreNormalGravity()
+                local resumed = performColliderHide(setStatus)
+                isPathfinding = false
+                if resumed and not abortTeleport and _G.TeleportGUI_Loaded and attempt < 2 then
+                    task.wait(0.15)
+                    pathfindTween(targetCF, statusCb, attempt + 1, true)
+                end
+                return
+            end
+            if abortTeleport then break end
+        end
+    end
+
+    isPathfinding = false
+    restoreNormalGravity()
+    if rootPart then rootPart.AssemblyLinearVelocity = Vector3.zero end
+
+    if not abortTeleport and rootPart then
+        local fp = computeTarget
+        if comboMode then
+            teleportTween(CFrame.new(fp.X, walkY, fp.Z), Config.UGRiseSpeed, false, true)
+        end
+        setStatus("✔ Pathfind selesai!", Color3.fromRGB(100, 220, 150))
+        task.delay(2, function()
+            if pfStatusRef then pfStatusRef.Text = "Aktif saat mode Tween / Hybrid dipilih" end
+            clearPathVisuals()
+        end)
+    end
+
+    abortTeleport = false
+end
+
+local function doTeleport(cf, mode, speed)
+    if Config.HybridYMode then
+        executeHybridYTeleport(cf, function(txt, col)
+            if pfStatusRef then pfStatusRef.Text = txt; pfStatusRef.TextColor3 = col or Color3.fromRGB(120, 220, 255) end
+        end)
+        return
+    end
+
+    if mode == "Tween" and Config.PathfindMode then
+        task.spawn(function() pathfindTween(cf, nil, 0, false) end)
+        return
+    end
+
+    if Config.UndergroundTeleport and mode == "Tween" then
+        if not rootPart then return end
+        local target = cf.Position
+        local downY  = rootPart.Position.Y - Config.UGDepth
+        teleportTween(CFrame.new(rootPart.Position.X, downY, rootPart.Position.Z), Config.UGRiseSpeed, false, true)
+        if abortTeleport then restoreNormalGravity(); return end
+        teleportTween(CFrame.new(target.X, downY, target.Z), speed, false, true)
+        if abortTeleport then restoreNormalGravity(); return end
+        teleportTween(CFrame.new(target.X, target.Y + 3.1, target.Z), Config.UGRiseSpeed, false, true)
+        restoreNormalGravity()
+        return
+    end
+
+    local finalCF = Config.UndergroundTeleport and CFrame.new(cf.Position.X, cf.Position.Y - Config.UGDepth, cf.Position.Z) or cf
+    if mode == "Tween" then
+        safeSingleLayerTween(finalCF, speed, false)
+    else
+        teleportInstant(finalCF, false)
+    end
+    restoreNormalGravity()
+end
+
+-- ==============================================================================
+-- SECTION 7: ESP SYSTEM (ITEM, GENERATOR, MONSTER, LINE, & NOCLIP/WINDOWWALL ESP)
+-- ==============================================================================
+local function clearESP(tag)
+    local list = espInstances[tag]
+    if list then
+        for _, inst in ipairs(list) do
+            pcall(function() if inst and inst.Parent then inst:Destroy() end end)
+        end
+        table.clear(list)
+    end
+end
+
+local function addHighlight(parent, fill, outline, tag)
+    if parent:FindFirstChild(tag) then return end
+    local h = Instance.new("Highlight")
+    h.Name             = tag
+    h.FillColor        = fill
+    h.OutlineColor     = outline
+    h.FillTransparency = 0.5
+    h.Parent           = parent
+    if espInstances[tag] then table.insert(espInstances[tag], h) end
+end
+
+local function addBillboard(parent, text, color, tag)
+    if parent:FindFirstChild(tag .. "BB") then return end
+    local bb = Instance.new("BillboardGui")
+    bb.Name        = tag .. "BB"
+    bb.Size        = UDim2.new(0, 120, 0, 40)
+    bb.AlwaysOnTop = true
+    bb.Parent      = parent
+    if parent:IsA("Model") then
+        bb.Adornee = getMonsterPart(parent)
+    elseif parent:IsA("BasePart") then
+        bb.Adornee = parent
+    end
+
+    local lbl = Instance.new("TextLabel", bb)
+    lbl.Size                   = UDim2.new(1, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text                   = text
+    lbl.TextColor3             = color
+    lbl.TextStrokeTransparency = 0.4
+    lbl.Font                   = Enum.Font.GothamBold
+    lbl.TextSize               = 13
+    lbl.TextWrapped            = true
+    if espInstances[tag] then table.insert(espInstances[tag], bb) end
+end
+
+local function refreshItemESP()
+    clearESP("_ItemESP")
+    if not isItemESPEnabled() then return end
+    local map    = getMap()
+    local folder = map and map:FindFirstChild("Items")
+    if not folder then return end
+    for _, item in ipairs(folder:GetChildren()) do
+        if item:IsA("Model") then
+            local iName = item.Name
+            local isPrio1 = priorityLookup[iName] or priorityLookup[iName:lower()]
+            local isPrio2 = secondPriorityLookup[iName] or secondPriorityLookup[iName:lower()]
+            local col = isPrio1 and Color3.fromRGB(255, 215, 0)
+                     or isPrio2 and Color3.fromRGB(80, 220, 255)
+                     or Color3.fromRGB(0, 220, 100)
+            addHighlight(item, col, Color3.fromRGB(255, 255, 255), "_ItemESP")
+            addBillboard(item, iName, col, "_ItemESP")
+        end
+    end
+end
+
+local function refreshGenESP()
+    clearESP("_GenESP")
+    if not Config.GenESP then return end
+    local map    = getMap()
+    local folder = map and map:FindFirstChild("Generators")
+    if not folder then return end
+    for _, gen in ipairs(folder:GetChildren()) do
+        if gen:IsA("Model") then
+            local stats     = gen:FindFirstChild("Stats")
+            local completed = stats and stats:FindFirstChild("Completed") and stats.Completed.Value
+            local possessed = stats and stats:FindFirstChild("Connie") and stats.Connie.Value
+            local cur       = stats and stats:FindFirstChild("CurrentAmount") and math.floor(stats.CurrentAmount.Value + 0.5) or 0
+            local req       = stats and stats:FindFirstChild("RequiredAmount") and stats.RequiredAmount.Value or 0
+            local fill      = completed and Color3.fromRGB(180, 0, 255) or possessed and Color3.fromRGB(0, 255, 255) or Color3.fromRGB(150, 150, 150)
+            addHighlight(gen, fill, Color3.fromRGB(255, 255, 255), "_GenESP")
+            local lbl = gen.Name .. "\n(" .. cur .. "/" .. req .. ")" .. (possessed and "\n[POSSESSED]" or "") .. (completed and "\n[DONE]" or "")
+            addBillboard(gen, lbl, fill, "_GenESP")
+        end
+    end
+end
+
+local function refreshMonsterESP()
+    clearESP("_MonsterESP")
+    if not Config.MonsterESP then return end
+    local map    = getMap()
+    local folder = map and map:FindFirstChild("Monsters")
+    if not folder then return end
+    for _, monster in ipairs(folder:GetChildren()) do
+        if monster:IsA("Model") then
+            local isPassive = isLooseMonsterName(monster.Name)
+            local fillCol = isPassive and Color3.fromRGB(255, 140, 0) or Color3.fromRGB(255, 30, 30)
+            local tagTxt  = isPassive and "[⚠ PASIF]\n" or "[👹 MONSTER]\n"
+            addHighlight(monster, fillCol, Color3.fromRGB(255, 255, 255), "_MonsterESP")
+            addBillboard(monster, tagTxt .. monster.Name, fillCol, "_MonsterESP")
+        end
+    end
+end
+
+local function refreshLineESP()
+    clearESP("_LineESP")
+    if not Config.LineESP or not rootPart then return end
+    local map    = getMap()
+    local folder = map and map:FindFirstChild("Monsters")
+    if not folder then return end
+
+    local originAtt = rootPart:FindFirstChild("_LineESPOrigin")
+    if not originAtt then
+        originAtt        = Instance.new("Attachment")
+        originAtt.Name   = "_LineESPOrigin"
+        originAtt.Parent = rootPart
+    end
+
+    for _, monster in ipairs(folder:GetChildren()) do
+        local mPart = getMonsterPart(monster)
+        if monster:IsA("Model") and mPart then
+            local ta = mPart:FindFirstChild("_LineESPTarget")
+            if not ta then
+                ta        = Instance.new("Attachment")
+                ta.Name   = "_LineESPTarget"
+                ta.Parent = mPart
+            end
+            local beam = Instance.new("Beam")
+            beam.Name          = "_LineESPBeam"
+            beam.Attachment0   = originAtt
+            beam.Attachment1   = ta
+            beam.Color         = ColorSequence.new(Color3.fromRGB(255, 50, 50), Color3.fromRGB(255, 150, 0))
+            beam.Width0        = 0.08
+            beam.Width1        = 0.08
+            beam.FaceCamera    = true
+            beam.Transparency  = NumberSequence.new(0.2)
+            beam.LightEmission = 1
+            beam.Segments      = 1
+            beam.Parent        = rootPart
+            table.insert(espInstances._LineESP, beam)
+        end
+    end
+end
+
+local rangeDangerFill, rangeDangerRing, rangeLooseRing = nil, nil, nil
+
+local function clearRangeESP()
+    if rangeDangerFill then pcall(function() rangeDangerFill:Destroy() end); rangeDangerFill = nil end
+    if rangeDangerRing then pcall(function() rangeDangerRing:Destroy() end); rangeDangerRing = nil end
+    if rangeLooseRing  then pcall(function() rangeLooseRing:Destroy() end);  rangeLooseRing  = nil end
+end
+
+local function refreshRangeESP()
+    if not Config.RangeESP or not rootPart or not _G.TeleportGUI_Loaded then
+        clearRangeESP()
+        return
+    end
+
+    local dangerRad = Config.MonsterDangerRadius or 20
+    local looseRad  = Config.LooseRadius or 10
+    local threatenedNow = isThreatened()
+
+    local mainColor = threatenedNow and Color3.fromRGB(255, 55, 55) or Color3.fromRGB(45, 255, 115)
+    local flatAngle = CFrame.new(0, -2.6, 0) * CFrame.Angles(math.rad(90), 0, 0)
+
+    if not rangeDangerFill or not rangeDangerFill.Parent then
+        rangeDangerFill = Instance.new("CylinderHandleAdornment")
+        rangeDangerFill.Name         = "_RangeESP_DangerFill"
+        rangeDangerFill.Height       = 0.05
+        rangeDangerFill.Transparency = 0.84
+        rangeDangerFill.AlwaysOnTop  = true
+        rangeDangerFill.ZIndex       = 0
+        rangeDangerFill.Parent       = rootPart
+    end
+    rangeDangerFill.Adornee = rootPart
+    rangeDangerFill.Radius  = dangerRad
+    rangeDangerFill.Color3  = mainColor
+    rangeDangerFill.CFrame  = flatAngle
+
+    if not rangeDangerRing or not rangeDangerRing.Parent then
+        rangeDangerRing = Instance.new("CylinderHandleAdornment")
+        rangeDangerRing.Name         = "_RangeESP_DangerRing"
+        rangeDangerRing.Height       = 0.12
+        rangeDangerRing.Transparency = 0.20
+        rangeDangerRing.AlwaysOnTop  = true
+        rangeDangerRing.ZIndex       = 1
+        rangeDangerRing.Parent       = rootPart
+    end
+    rangeDangerRing.Adornee     = rootPart
+    rangeDangerRing.Radius      = dangerRad
+    rangeDangerRing.InnerRadius = math.max(dangerRad - 0.35, 0)
+    rangeDangerRing.Color3      = mainColor
+    rangeDangerRing.CFrame      = flatAngle
+
+    if not rangeLooseRing or not rangeLooseRing.Parent then
+        rangeLooseRing = Instance.new("CylinderHandleAdornment")
+        rangeLooseRing.Name         = "_RangeESP_LooseRing"
+        rangeLooseRing.Height       = 0.10
+        rangeLooseRing.Transparency = 0.35
+        rangeLooseRing.AlwaysOnTop  = true
+        rangeLooseRing.ZIndex       = 1
+        rangeLooseRing.Parent       = rootPart
+    end
+    rangeLooseRing.Adornee     = rootPart
+    rangeLooseRing.Radius      = looseRad
+    rangeLooseRing.InnerRadius = math.max(looseRad - 0.25, 0)
+    rangeLooseRing.Color3      = Color3.fromRGB(180, 255, 70)
+    rangeLooseRing.CFrame      = flatAngle
+end
+
+local function clearNoClipESP()
+    clearESP("_NoClipESP")
+end
+
+local function refreshNoClipESP()
+    clearNoClipESP()
+    if not Config.NoClipESP then return end
+    updateColliderCaches()
+    for _, entry in ipairs(cachedESPAdornees) do
+        local target = entry.adornee
+        if target and target.Parent then
+            local sb = Instance.new("SelectionBox")
+            sb.Name                = "_NoClipESP"
+            sb.Color3              = Color3.fromRGB(255, 40, 40)
+            sb.SurfaceColor3       = Color3.fromRGB(255, 40, 40)
+            sb.SurfaceTransparency = 0.6
+            sb.LineThickness       = 0.04
+            sb.Adornee             = target
+            sb.Parent              = Workspace
+            table.insert(espInstances._NoClipESP, sb)
+
+            if Config.NoClipLabel then
+                local bb = Instance.new("BillboardGui")
+                bb.Name        = "_NoClipESPBB"
+                bb.Size        = UDim2.new(0, 110, 0, 26)
+                bb.AlwaysOnTop = true
+                bb.Adornee     = target:IsA("Model") and getMonsterPart(target) or target
+                bb.Parent      = Workspace
+
+                local lbl = Instance.new("TextLabel", bb)
+                lbl.Size                   = UDim2.new(1, 0, 1, 0)
+                lbl.BackgroundTransparency = 1
+                lbl.Font                   = Enum.Font.GothamBold
+                lbl.TextSize               = 9
+                lbl.TextColor3             = Color3.fromRGB(255, 100, 100)
+                lbl.TextStrokeTransparency = 0.2
+                lbl.TextWrapped            = true
+                lbl.Text                   = entry.label or target.Name
+                table.insert(espInstances._NoClipESP, bb)
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    while _G.TeleportGUI_Loaded do
+        if isItemESPEnabled() then refreshItemESP() end
+        if Config.GenESP then refreshGenESP() end
+        task.wait(2)
+    end
+end)
+
+task.spawn(function()
+    while _G.TeleportGUI_Loaded do
+        if Config.MonsterESP then refreshMonsterESP() end
+        if Config.LineESP    then refreshLineESP()    end
+        if Config.RangeESP   then refreshRangeESP()   else clearRangeESP() end
+        task.wait(0.5)
+    end
+    clearRangeESP()
+end)
+
+task.spawn(function()
+    while _G.TeleportGUI_Loaded do
+        if Config.NoClipESP then refreshNoClipESP() end
+        task.wait(1.5)
+    end
+    clearNoClipESP()
+end)
+
+-- ==============================================================================
+-- SECTION 8: GENERATOR TELEPORT & SMART AUTO PRIORITY PICKUP SYSTEM
+-- ==============================================================================
+local function interactWithPrompt(prompt)
+    prompt.RequiresLineOfSight   = false
+    prompt.MaxActivationDistance = math.huge
+    if fireproximityprompt then
+        fireproximityprompt(prompt, 1)
+    else
+        pcall(function()
+            prompt:InputHoldBegin()
+            if prompt.HoldDuration > 0 then task.wait(prompt.HoldDuration) end
+            prompt:InputHoldEnd()
+        end)
+    end
+end
+
+-- Menentukan Tier Prioritas suatu Item berdasarkan Config.Pickup:
+-- Tier 1 = PriorityList ("ResearchCapsule")
+-- Tier 2 = SecondPriorityList ("Bandage", "HealthKit")
+-- Tier 3 = Item lain yang TIDAK ada di IgnoreList
+-- nil    = Item masuk IgnoreList (Diabaikan)
+local function getItemPriorityTier(itemName)
+    if not itemName then return nil end
+    local lower = itemName:lower()
+    if priorityLookup[itemName] or priorityLookup[lower] then
+        return 1
+    end
+    if secondPriorityLookup[itemName] or secondPriorityLookup[lower] then
+        return 2
+    end
+    if ignoreLookup[itemName] or ignoreLookup[lower] then
+        return nil
+    end
+    return 3
+end
+
+-- [FITUR BARU] Auto Pickup Aura Loop (Menyedot semua item prioritas dalam radius Config.Pickup.AuraRange = 30 studs sambil jalan)
+task.spawn(function()
+    while _G.TeleportGUI_Loaded do
+        if Config.Pickup and Config.Pickup.Enable and rootPart and not abortTeleport then
+            local auraRad = Config.Pickup.AuraRange or 30
+            local map     = getMap()
+            local folder  = map and map:FindFirstChild("Items")
+            if folder then
+                local rpPos = rootPart.Position
+                for _, item in ipairs(folder:GetChildren()) do
+                    if item:IsA("Model") and item.Parent and getItemPriorityTier(item.Name) ~= nil then
+                        local ok, itemPos = pcall(function() return item:GetPivot().Position end)
+                        if ok and itemPos and (itemPos - rpPos).Magnitude <= auraRad then
+                            local pp   = item:FindFirstChild("Prompt")
+                            local prox = pp and pp:FindFirstChild("ProximityPrompt")
+                            if prox and prox.Enabled then
+                                interactWithPrompt(prox)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.25)
+    end
+end)
+
+local function getGeneratorsInRoom()
+    local genList = {}
+    local map     = getMap()
+    local folder  = map and map:FindFirstChild("Generators")
+    if not folder then return genList end
+
+    for idx, gen in ipairs(folder:GetChildren()) do
+        if gen:IsA("Model") then
+            local stats     = gen:FindFirstChild("Stats")
+            local completed = stats and stats:FindFirstChild("Completed") and stats.Completed.Value or false
+            local possessed = stats and stats:FindFirstChild("Connie") and stats.Connie.Value or false
+            local cur       = stats and stats:FindFirstChild("CurrentAmount") and math.floor(stats.CurrentAmount.Value + 0.5) or 0
+            local req       = stats and stats:FindFirstChild("RequiredAmount") and stats.RequiredAmount.Value or 45
+
+            local targetPart = gen:FindFirstChild("Prompt")
+                or gen:FindFirstChild("Origin")
+                or gen:FindFirstChild("InvisBlock")
+                or gen.PrimaryPart
+                or gen:FindFirstChildWhichIsA("BasePart", true)
+
+            if targetPart then
+                local gPos = targetPart:IsA("BasePart") and targetPart.Position or gen:GetPivot().Position
+                local genStandY = getTargetStandingY(gPos.Y, false)
+                local tpCF = CFrame.new(gPos.X, genStandY, gPos.Z)
+                local statusTag = completed and " [DONE]" or (possessed and " [POSSESSED]" or "")
+                local displayLabel = string.format("Gen #%d (%d/%d)%s", idx, cur, req, statusTag)
+
+                table.insert(genList, {
+                    id        = idx,
+                    model     = gen,
+                    label     = displayLabel,
+                    cf        = tpCF,
+                    position  = tpCF.Position,
+                    completed = completed,
+                    possessed = possessed,
+                })
+            end
+        end
+    end
+    return genList
+end
+
+local function getItemsInRoom()
+    local items  = {}
+    local map    = getMap()
+    local folder = map and map:FindFirstChild("Items")
+    if not folder then return items end
+    for _, item in ipairs(folder:GetChildren()) do
+        if item:IsA("Model") then
+            if not items[item.Name] then
+                items[item.Name] = { count = 0, instances = {} }
+            end
+            items[item.Name].count = items[item.Name].count + 1
+            table.insert(items[item.Name].instances, item)
+        end
+    end
+    return items
+end
+
+-- ==============================================================================
+-- SMART PRIORITY ITEM PICKUP ENGINE (MONSTER-AWARE DYNAMIC REROUTING)
+-- 1. Jika specificTargetName == nil, otomatis ambil berdasarkan Config.Pickup
+--    (PriorityList -> SecondPriorityList -> Non-Ignored) & jarak terdekat.
+-- 2. Jika ada monster di dekat item yang dituju (atau saat sedang jalan ke item itu),
+--    langsung alihkan tujuan ke item aman lain terlebih dahulu!
+-- ==============================================================================
+local function runSmartItemPickup(specificTargetName, cb)
+    if isPickingUp then return end
+    isPickingUp   = true
+    abortTeleport = false
+    rebuildPickupLookups()
+
+    local moveMode  = Config.SyncPickupWithMain and Config.TeleportMode or (Config.Pickup and Config.Pickup.MovementMode or Config.PickupMode)
+    local moveSpeed = Config.SyncPickupWithMain and Config.TweenSpeed or (Config.Pickup and Config.Pickup.TweenSpeed or Config.PickupTweenSpeed)
+
+    task.spawn(function()
+        updateColliderCaches()
+
+        local function makePlatform(atPos)
+            local plat = Instance.new("Part")
+            plat.Size         = Vector3.new(10, 1, 10)
+            plat.Anchored     = true
+            plat.CanCollide   = true
+            plat.Transparency = 1
+            plat.CFrame       = CFrame.new(atPos.X, atPos.Y - 3, atPos.Z)
+            plat.Parent       = Workspace
+            return plat
+        end
+
+        local skipCounts      = {}
+        local cooldownUntil   = {} -- Cooldown sementara untuk item yang sedang dijaga monster agar pindah ke item lain dulu
+
+        -- Menyusun daftar kandidat item di ruangan berdasarkan:
+        -- 1) Aman dari monster (tidak sedang dijaga monster)
+        -- 2) Tier Prioritas (1 = PriorityList, 2 = SecondPriorityList, 3 = Non-Ignored)
+        -- 3) Jarak terdekat dari posisi LocalPlayer sekarang
+        local function getSortedCandidateItems()
+            local safeList    = {}
+            local guardedList = {}
+            local map         = getMap()
+            local folder      = map and map:FindFirstChild("Items")
+            if not folder or not rootPart then return safeList, guardedList end
+
+            local now   = os.clock()
+            local rpPos = rootPart.Position
+
+            for _, item in ipairs(folder:GetChildren()) do
+                if item:IsA("Model") and item.Parent and (skipCounts[item] or 0) < 3 then
+                    local tier = nil
+                    if specificTargetName then
+                        if item.Name == specificTargetName then tier = 1 end
+                    else
+                        tier = getItemPriorityTier(item.Name)
+                    end
+
+                    if tier ~= nil then
+                        local itemPos = item:GetPivot().Position
+                        local dist    = (rpPos - itemPos).Magnitude
+                        local isOnCooldown = (cooldownUntil[item] and now < cooldownUntil[item])
+                        local isDangerous  = isOnCooldown or isItemAreaDangerous(itemPos)
+
+                        local entry = {
+                            instance = item,
+                            name     = item.Name,
+                            tier     = tier,
+                            pos      = itemPos,
+                            dist     = dist,
+                        }
+
+                        if isDangerous then
+                            table.insert(guardedList, entry)
+                        else
+                            table.insert(safeList, entry)
+                        end
+                    end
+                end
+            end
+
+            local function sortFn(a, b)
+                if a.tier ~= b.tier then
+                    return a.tier < b.tier -- Tier 1 (ResearchCapsule) lebih dulu dari Tier 2 (Bandage/HealthKit)
+                end
+                return a.dist < b.dist -- Di dalam tier yang sama, ambil yang paling dekat!
+            end
+
+            table.sort(safeList, sortFn)
+            table.sort(guardedList, sortFn)
+            return safeList, guardedList
+        end
+
+        local initSafe, initGuarded = getSortedCandidateItems()
+        if #initSafe == 0 and #initGuarded == 0 then
+            if cb then
+                cb(specificTargetName and ("Item '" .. specificTargetName .. "' tidak ada!") or "✔ Semua item prioritas sudah bersih!")
+            end
+            isPickingUp = false
+            return
+        end
+
+        while isPickingUp and not abortTeleport and _G.TeleportGUI_Loaded do
+            -- 1. Jika karakter kita sendiri sedang terancam monster, sembunyi dulu ke tengah Collider tebal terdekat
+            if isThreatened() then
+                local okHide = performColliderHide(function(msg) if cb then cb(msg) end end)
+                if not okHide or abortTeleport or not isPickingUp then break end
+            end
+
+            local safeCandidates, guardedCandidates = getSortedCandidateItems()
+            if #safeCandidates == 0 and #guardedCandidates == 0 then
+                break
+            end
+
+            local chosen = safeCandidates[1]
+
+            -- 2. Jika semua item yang tersisa sedang dijaga monster di dekatnya:
+            if not chosen then
+                if isThreatened() then
+                    performColliderHide(function(msg) if cb then cb(msg) end end)
+                    continue
+                end
+                -- Jika mode Instant / Hybrid, masih bisa menyambar cepat; jika Tween, tunggu sebentar hingga monster bergeser dari item
+                if moveMode == "Instant" or Config.HybridYMode then
+                    chosen = guardedCandidates[1]
+                else
+                    local guardedName = guardedCandidates[1].name
+                    if cb then
+                        cb("⏳ Menunggu monster menjauh dari " .. guardedName .. " (" .. #guardedCandidates .. " tersisa)...")
+                    end
+                    task.wait(0.8)
+                    -- Lepas cooldown jika sudah menunggu
+                    for k in pairs(cooldownUntil) do cooldownUntil[k] = nil end
+                    continue
+                end
+            end
+
+            local item    = chosen.instance
+            local itemPos = chosen.pos
+            local totalRem = #safeCandidates + #guardedCandidates
+
+            if cb then
+                local prioTag = (chosen.tier == 1) and "⭐ " or (chosen.tier == 2 and "💊 " or "🎯 ")
+                cb(string.format("%sAmbil %s ( %.0fm | Sisa: %d )...", prioTag, chosen.name, chosen.dist, totalRem))
+            end
+
+            local itemStandY = getTargetStandingY(itemPos.Y, false)
+            local targetPos  = Vector3.new(itemPos.X, itemStandY, itemPos.Z)
+            local targetCF   = CFrame.new(targetPos)
+
+            -- Fungsi deteksi real-time selama berjalan menuju item:
+            -- Jika tiba-tiba ada monster mendekati item tujuan dan masih ada item lain yang aman, batalkan jalan & pindah ke item lain!
+            local switchedToOtherItem = false
+            local function shouldRerouteToSaferItem()
+                if not item or not item.Parent then return true end
+                if moveMode == "Tween" and isItemAreaDangerous(item:GetPivot().Position) then
+                    cooldownUntil[item] = os.clock() + 4.5 -- Tandai item ini berbahaya selama 4.5 detik agar langsung pindah ke item lain
+                    switchedToOtherItem = true
+                    return true
+                end
+                return false
+            end
+
+            local moveInterrupted = false
+            if Config.HybridYMode then
+                executeHybridYTeleport(targetCF, function(msg) if cb then cb(msg) end end)
+            elseif moveMode == "Tween" and Config.PathfindMode then
+                task.spawn(function() pathfindTween(targetCF, nil, 0, false) end)
+                local w = 0
+                while not isPathfinding and w < 0.6 do task.wait(0.05); w = w + 0.05 end
+                w = 0
+                while (isPathfinding or isHiding) and w < 45 and not abortTeleport and isPickingUp do
+                    if shouldRerouteToSaferItem() then
+                        if activeTween then pcall(function() activeTween:Cancel() end) end
+                        pcall(function() RunService:UnbindFromRenderStep("_TeleportWalkSim") end)
+                        isPathfinding = false
+                        break
+                    end
+                    task.wait(0.1)
+                    w = w + 0.1
+                end
+                task.wait(0.08)
+            elseif moveMode == "Tween" and Config.UndergroundTeleport then
+                local downY = rootPart.Position.Y - Config.UGDepth
+                moveInterrupted = teleportTween(CFrame.new(rootPart.Position.X, downY, rootPart.Position.Z), Config.UGRiseSpeed, false, true)
+                if not moveInterrupted and not abortTeleport then
+                    moveInterrupted = teleportTween(CFrame.new(targetCF.X, downY, targetCF.Z), moveSpeed, false, true, shouldRerouteToSaferItem)
+                end
+                if not moveInterrupted and not abortTeleport and not switchedToOtherItem then
+                    moveInterrupted = teleportTween(CFrame.new(targetCF.X, itemStandY, targetCF.Z), Config.UGRiseSpeed, false, true)
+                end
+            elseif moveMode == "Tween" then
+                moveInterrupted = safeSingleLayerTween(targetCF, moveSpeed, false, shouldRerouteToSaferItem)
+            else
+                teleportInstant(targetCF, false)
+            end
+
+            if abortTeleport or not isPickingUp then break end
+
+            -- 3. Jika batal karena ada monster di dekat item tujuan -> Langsung lanjut loop untuk pindah ke item aman berikutnya!
+            if switchedToOtherItem then
+                if cb then cb("🔀 Monster di dekat " .. chosen.name .. "! Beralih ke item aman lain...") end
+                task.wait(0.08)
+                continue
+            end
+
+            -- 4. Jika karakter kita yang terancam monster di tengah jalan -> Sembunyi dulu, lalu lanjut ambil item lain!
+            if moveInterrupted or isThreatened() then
+                local okHide = performColliderHide(function(msg) if cb then cb(msg) end end)
+                if not okHide or abortTeleport or not isPickingUp then break end
+                task.wait(0.1)
+                continue
+            end
+
+            -- Jika item sudah terambil oleh AuraRange di tengah jalan, langsung lanjut ke item berikutnya!
+            if not item.Parent then
+                task.wait(0.05)
+                continue
+            end
+
+            local horizDist = Vector2.new(rootPart.Position.X - itemPos.X, rootPart.Position.Z - itemPos.Z).Magnitude
+            if horizDist > 11.5 then
+                skipCounts[item] = (skipCounts[item] or 0) + 1
+                task.wait(0.1)
+                continue
+            end
+
+            -- 5. Eksekusi ProximityPrompt pada item
+            local holdTargetPos = rootPart.Position
+            local plat = makePlatform(holdTargetPos)
+            local holdPickupConn = startServerSyncedHold(function() return holdTargetPos end)
+            local waitTicks = 0
+            local monsterInterrupted = false
+
+            while item.Parent and waitTicks < 18 and not abortTeleport and isPickingUp do
+                if isThreatened() then
+                    monsterInterrupted = true
+                    break
+                end
+                if moveMode == "Tween" and isItemAreaDangerous(itemPos) then
+                    cooldownUntil[item] = os.clock() + 4.5
+                    switchedToOtherItem = true
+                    break
+                end
+
+                local pp   = item:FindFirstChild("Prompt")
+                local prox = pp and pp:FindFirstChild("ProximityPrompt")
+                if prox and prox.Enabled then
+                    interactWithPrompt(prox)
+                end
+
+                task.wait(0.08)
+                waitTicks = waitTicks + 1
+            end
+
+            if holdPickupConn then holdPickupConn:Disconnect(); holdPickupConn = nil end
+            if plat and plat.Parent then plat:Destroy() end
+            if rootPart then rootPart.Anchored = false end
+
+            if monsterInterrupted then
+                local okHide = performColliderHide(function(msg) if cb then cb(msg) end end)
+                if not okHide or abortTeleport or not isPickingUp then break end
+                task.wait(0.1)
+                continue
+            end
+
+            if switchedToOtherItem then
+                if cb then cb("🔀 Monster mendekat! Pindah ke item lain...") end
+                task.wait(0.08)
+                continue
+            end
+
+            if item.Parent then
+                skipCounts[item] = (skipCounts[item] or 0) + 1
+            end
+
+            if Config.HybridYMode and not abortTeleport and isPickingUp then
+                moveIntoNearestColliderCenter(Config.TweenSpeed, true)
+                setTargetColliderPassable(nil, false)
+                restoreNormalGravity()
+                task.wait(0.12)
+            else
+                restoreNormalGravity()
+                task.wait(0.12)
+            end
+        end
+
+        clearAllServerSyncedHolds()
+        if rootPart then rootPart.Anchored = false end
+        setTargetColliderPassable(nil, false)
+        restoreNormalGravity()
+        isPickingUp = false
+        if pfStatusRef then
+            pfStatusRef.Text = "Aktif saat mode Tween / Hybrid dipilih"
+            pfStatusRef.TextColor3 = Color3.fromRGB(90, 90, 120)
+        end
+        if cb then
+            cb(specificTargetName and ("✔ Selesai ambil " .. specificTargetName .. "!") or "✔ Semua item prioritas selesai diambil!")
+        end
+    end)
+end
+
+-- Watcher Otomatis: Jika Config.Pickup.Enable == true, otomatis jalankan Smart Priority Pickup setiap ada item prioritas di ruangan!
+task.spawn(function()
+    while _G.TeleportGUI_Loaded do
+        if Config.Pickup and Config.Pickup.Enable and not isPickingUp and not isPathfinding and not isHiding and not abortTeleport and rootPart then
+            local allDone = false
+            if Config.AutoElevator then
+                allDone = isFloorAllMachinesDone()
+            end
+            if not allDone then
+                local map    = getMap()
+                local folder = map and map:FindFirstChild("Items")
+                if folder then
+                    local hasPriorityItem = false
+                    for _, item in ipairs(folder:GetChildren()) do
+                        if item:IsA("Model") and getItemPriorityTier(item.Name) ~= nil then
+                            hasPriorityItem = true
+                            break
+                        end
+                    end
+                    if hasPriorityItem then
+                        runSmartItemPickup(nil, function(msg)
+                            if puStatusRef then puStatusRef.Text = msg end
+                        end)
+                    end
+                end
+            end
+        end
+        task.wait(1.2)
+    end
+end)
+
+-- ==============================================================================
+-- SECTION 9: GUI BUILDER & INTERACTION
+-- ==============================================================================
+local oldGui = CoreGui:FindFirstChild("TeleportStandaloneGUI")
+if oldGui then oldGui:Destroy() end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name           = "TeleportStandaloneGUI"
+screenGui.ResetOnSpawn   = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent         = CoreGui
+
+local mainFrame = Instance.new("Frame", screenGui)
+mainFrame.Name             = "MainFrame"
+mainFrame.Size             = UDim2.new(0, 290, 0, 540)
+mainFrame.Position         = UDim2.new(0.5, -145, 0.5, -270)
+mainFrame.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
+mainFrame.BorderSizePixel  = 0
+mainFrame.Active           = true
+mainFrame.Draggable        = true
+mainFrame.ClipsDescendants = true
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
+local ms = Instance.new("UIStroke", mainFrame)
+ms.Color     = Color3.fromRGB(70, 70, 110)
+ms.Thickness = 1
+
+local titleBar = Instance.new("Frame", mainFrame)
+titleBar.Size             = UDim2.new(1, 0, 0, 38)
+titleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
+titleBar.BorderSizePixel  = 0
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+
+local titleLbl = Instance.new("TextLabel", titleBar)
+titleLbl.Size                   = UDim2.new(1, -46, 1, 0)
+titleLbl.Position               = UDim2.new(0, 12, 0, 0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Text                   = "⚡ TELEPORT GUI v5"
+titleLbl.TextColor3             = Color3.fromRGB(200, 200, 255)
+titleLbl.Font                   = Enum.Font.GothamBold
+titleLbl.TextSize               = 14
+titleLbl.TextXAlignment         = Enum.TextXAlignment.Left
+
+local closeBtn = Instance.new("TextButton", titleBar)
+closeBtn.Size             = UDim2.new(0, 28, 0, 28)
+closeBtn.Position         = UDim2.new(1, -34, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+closeBtn.Text             = "X"
+closeBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+closeBtn.Font             = Enum.Font.GothamBold
+closeBtn.TextSize         = 13
+closeBtn.BorderSizePixel  = 0
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+local scroll = Instance.new("ScrollingFrame", mainFrame)
+scroll.Size                   = UDim2.new(1, 0, 1, -42)
+scroll.Position               = UDim2.new(0, 0, 0, 42)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel        = 0
+scroll.ScrollBarThickness     = 4
+scroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize    = Enum.AutomaticSize.Y
+
+local content = Instance.new("Frame", scroll)
+content.Size                   = UDim2.new(1, 0, 0, 0)
+content.BackgroundTransparency = 1
+content.AutomaticSize          = Enum.AutomaticSize.Y
+
+local cl = Instance.new("UIListLayout", content)
+cl.SortOrder = Enum.SortOrder.LayoutOrder
+cl.Padding   = UDim.new(0, 6)
+
+cl:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    scroll.CanvasSize = UDim2.new(0, 0, 0, cl.AbsoluteContentSize.Y + 24)
+end)
+
+local cp = Instance.new("UIPadding", content)
+cp.PaddingLeft   = UDim.new(0, 8)
+cp.PaddingRight  = UDim.new(0, 8)
+cp.PaddingTop    = UDim.new(0, 6)
+cp.PaddingBottom = UDim.new(0, 14)
+
+local lo = 0
+local function nextLO() lo = lo + 1; return lo end
+
+local function sectionLabel(txt)
+    local l = Instance.new("TextLabel", content)
+    l.Size                   = UDim2.new(1, 0, 0, 18)
+    l.BackgroundTransparency = 1
+    l.Text                   = txt
+    l.TextColor3             = Color3.fromRGB(120, 120, 160)
+    l.Font                   = Enum.Font.GothamBold
+    l.TextSize               = 11
+    l.TextXAlignment         = Enum.TextXAlignment.Left
+    l.LayoutOrder            = nextLO()
+    return l
+end
+
+local function subLabel(txt)
+    local l = Instance.new("TextLabel", content)
+    l.Size                   = UDim2.new(1, 0, 0, 14)
+    l.BackgroundTransparency = 1
+    l.Text                   = txt
+    l.TextColor3             = Color3.fromRGB(100, 100, 130)
+    l.Font                   = Enum.Font.Gotham
+    l.TextSize               = 10
+    l.TextXAlignment         = Enum.TextXAlignment.Left
+    l.LayoutOrder            = nextLO()
+    return l
+end
+
+local function divider()
+    local d = Instance.new("Frame", content)
+    d.Size             = UDim2.new(1, 0, 0, 1)
+    d.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+    d.BorderSizePixel  = 0
+    d.LayoutOrder      = nextLO()
+    return d
+end
+
+local function makeBtn(txt, bg, tc)
+    local b = Instance.new("TextButton", content)
+    b.Size             = UDim2.new(1, 0, 0, 32)
+    b.BackgroundColor3 = bg or Color3.fromRGB(35, 35, 55)
+    b.TextColor3       = tc or Color3.fromRGB(220, 220, 255)
+    b.Font             = Enum.Font.GothamBold
+    b.TextSize         = 12
+    b.BorderSizePixel  = 0
+    b.Text             = txt
+    b.LayoutOrder      = nextLO()
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    return b
+end
+
+local function makeTogglePair(tA, tB)
+    local f = Instance.new("Frame", content)
+    f.Size                   = UDim2.new(1, 0, 0, 32)
+    f.BackgroundTransparency = 1
+    f.LayoutOrder            = nextLO()
+    local fl = Instance.new("UIListLayout", f)
+    fl.FillDirection = Enum.FillDirection.Horizontal
+    fl.Padding       = UDim.new(0, 6)
+
+    local bA = Instance.new("TextButton", f)
+    bA.Size            = UDim2.new(0.5, -3, 1, 0)
+    bA.BorderSizePixel = 0
+    bA.Font            = Enum.Font.GothamBold
+    bA.TextSize        = 12
+    bA.Text            = tA
+    bA.LayoutOrder     = 1
+    Instance.new("UICorner", bA).CornerRadius = UDim.new(0, 6)
+
+    local bB = Instance.new("TextButton", f)
+    bB.Size            = UDim2.new(0.5, -3, 1, 0)
+    bB.BorderSizePixel = 0
+    bB.Font            = Enum.Font.GothamBold
+    bB.TextSize        = 12
+    bB.Text            = tB
+    bB.LayoutOrder     = 2
+    Instance.new("UICorner", bB).CornerRadius = UDim.new(0, 6)
+    return bA, bB
+end
+
+local function statusLbl()
+    local l = Instance.new("TextLabel", content)
+    l.Size                   = UDim2.new(1, 0, 0, 20)
+    l.BackgroundTransparency = 1
+    l.Text                   = ""
+    l.TextColor3             = Color3.fromRGB(160, 220, 160)
+    l.Font                   = Enum.Font.Gotham
+    l.TextSize               = 11
+    l.TextXAlignment         = Enum.TextXAlignment.Center
+    l.TextWrapped            = true
+    l.LayoutOrder            = nextLO()
+    return l
+end
+
+local function makeSlider(minVal, maxVal, initialVal, step, fillCol, thumbCol, textCol, onChange)
+    local row = Instance.new("Frame", content)
+    row.Size                   = UDim2.new(1, 0, 0, 28)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder            = nextLO()
+
+    local input = Instance.new("TextBox", row)
+    input.Size             = UDim2.new(0, 56, 1, 0)
+    input.Position         = UDim2.new(1, -56, 0, 0)
+    input.BackgroundColor3 = Color3.fromRGB(28, 28, 45)
+    input.BorderSizePixel  = 0
+    input.TextColor3       = textCol
+    input.Font             = Enum.Font.GothamBold
+    input.TextSize         = 12
+    input.Text             = tostring(initialVal)
+    input.ClearTextOnFocus = false
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 6)
+
+    local track = Instance.new("Frame", row)
+    track.Size             = UDim2.new(1, -64, 0, 6)
+    track.Position         = UDim2.new(0, 0, 0.5, -3)
+    track.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
+    track.BorderSizePixel  = 0
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
+
+    local fill = Instance.new("Frame", track)
+    fill.BackgroundColor3 = fillCol
+    fill.BorderSizePixel  = 0
+    fill.Size             = UDim2.new(0, 0, 1, 0)
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+
+    local thumb = Instance.new("TextButton", track)
+    thumb.Size             = UDim2.new(0, 16, 0, 16)
+    thumb.BackgroundColor3 = thumbCol
+    thumb.Text             = ""
+    thumb.BorderSizePixel  = 0
+    thumb.ZIndex           = 5
+    Instance.new("UICorner", thumb).CornerRadius = UDim.new(0, 8)
+
+    local curVal = initialVal
+    local function setVal(v)
+        v      = math.clamp(math.floor(v / step + 0.5) * step, minVal, maxVal)
+        v      = tonumber(string.format("%.2f", v))
+        curVal = v
+        local f = (v - minVal) / (maxVal - minVal)
+        fill.Size      = UDim2.new(f, 0, 1, 0)
+        thumb.Position = UDim2.new(f, -8, 0.5, -8)
+        input.Text     = tostring(v)
+        onChange(v)
+    end
+    setVal(initialVal)
+
+    local dragging = false
+    thumb.MouseButton1Down:Connect(function()
+        dragging = true
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not dragging then conn:Disconnect(); return end
+            local mp   = UserInputService:GetMouseLocation()
+            local frac = math.clamp((mp.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+            setVal(minVal + frac * (maxVal - minVal))
+        end)
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    input.FocusLost:Connect(function()
+        local v = tonumber(input.Text)
+        if v then setVal(v) else input.Text = tostring(curVal) end
+    end)
+end
+
+-- [ 9.1: NOCLIP UI ]
+sectionLabel("NOCLIP (WALL, PROP, GEN & CUTOUT)")
+local noclipToggleBtn = makeBtn("👻 NoClip (Tembok & Objek): OFF", Color3.fromRGB(30, 30, 45), Color3.fromRGB(160, 160, 180))
+
+local function updateNoClipToggleUI()
+    if Config.NoClip then
+        noclipToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 70)
+        noclipToggleBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+        noclipToggleBtn.Text             = "👻 NoClip (Tembok & Objek): ON"
+    else
+        noclipToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+        noclipToggleBtn.TextColor3       = Color3.fromRGB(160, 160, 180)
+        noclipToggleBtn.Text             = "👻 NoClip (Tembok & Objek): OFF"
+    end
+end
+updateNoClipToggleUI()
+applyNoClipState()
+
+noclipToggleBtn.MouseButton1Click:Connect(function()
+    Config.NoClip = not Config.NoClip
+    applyNoClipState()
+    updateNoClipToggleUI()
+end)
+
+-- [ 9.2: TELEPORT MODE & HYBRID Y-BYPASS UI ]
+divider()
+sectionLabel("TELEPORT MODE & HYBRID Y-BYPASS")
+local btnI, btnT = makeTogglePair("⚡ Instant", "🌊 Tween")
+local hybridBtn  = makeBtn("🚀 Hybrid (Collider > Y-Bypass > Instant): OFF", Color3.fromRGB(30, 30, 45), Color3.fromRGB(160, 160, 180))
+local updatePFBtn
+
+local function updateModeUI()
+    if Config.TeleportMode == "Instant" then
+        btnI.BackgroundColor3 = Color3.fromRGB(60, 100, 200); btnI.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnT.BackgroundColor3 = Color3.fromRGB(30, 30, 45);   btnT.TextColor3 = Color3.fromRGB(160, 160, 180)
+    else
+        btnT.BackgroundColor3 = Color3.fromRGB(60, 100, 200); btnT.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btnI.BackgroundColor3 = Color3.fromRGB(30, 30, 45);   btnI.TextColor3 = Color3.fromRGB(160, 160, 180)
+    end
+    if Config.HybridYMode then
+        hybridBtn.BackgroundColor3 = Color3.fromRGB(130, 45, 160)
+        hybridBtn.TextColor3       = Color3.fromRGB(255, 230, 255)
+        hybridBtn.Text             = "🚀 Hybrid (Collider > Y-Bypass > Instant): ON"
+    else
+        hybridBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+        hybridBtn.TextColor3       = Color3.fromRGB(160, 160, 180)
+        hybridBtn.Text             = "🚀 Hybrid (Collider > Y-Bypass > Instant): OFF"
+    end
+end
+updateModeUI()
+
+btnI.MouseButton1Click:Connect(function()
+    Config.TeleportMode = "Instant"
+    if Config.SyncPickupWithMain then
+        Config.PickupMode = "Instant"
+        if Config.Pickup then Config.Pickup.MovementMode = "Instant" end
+    end
+    if Config.PathfindMode then
+        Config.PathfindMode = false
+        clearPathVisuals()
+        if updatePFBtn then updatePFBtn() end
+    end
+    updateModeUI()
+end)
+btnT.MouseButton1Click:Connect(function()
+    Config.TeleportMode = "Tween"
+    if Config.SyncPickupWithMain then
+        Config.PickupMode = "Tween"
+        if Config.Pickup then Config.Pickup.MovementMode = "Tween" end
+    end
+    updateModeUI()
+end)
+hybridBtn.MouseButton1Click:Connect(function()
+    Config.HybridYMode = not Config.HybridYMode
+    updateModeUI()
+end)
+
+subLabel("Koordinat Y-Bypass Hybrid (contoh: -240 atau 241)")
+makeSlider(-400, 400, Config.HybridBypassY, 1, Color3.fromRGB(160, 70, 210), Color3.fromRGB(220, 140, 255), Color3.fromRGB(230, 180, 255), function(v)
+    Config.HybridBypassY = v
+end)
+
+subLabel("Waktu tunggu di koordinat Y-Bypass (detik)")
+makeSlider(0.05, 5.0, Config.HybridBypassDelay, 0.05, Color3.fromRGB(190, 90, 240), Color3.fromRGB(235, 170, 255), Color3.fromRGB(240, 200, 255), function(v)
+    Config.HybridBypassDelay = v
+end)
+
+divider()
+sectionLabel("TWEEN SPEED (Open Air vs Obstacle NoClip)")
+subLabel("Speed Jalan Bebas / Tanpa Halangan (Cepat)")
+local isInitSpeed = true
+makeSlider(0.1, 15.0, Config.TweenSpeed, 0.05, Color3.fromRGB(80, 130, 230), Color3.fromRGB(150, 180, 255), Color3.fromRGB(220, 220, 255), function(v)
+    Config.TweenSpeed = v
+    if not isInitSpeed or Config.SyncPickupWithMain then
+        Config.PickupTweenSpeed = v
+        if Config.Pickup then Config.Pickup.TweenSpeed = v end
+    end
+    isInitSpeed = false
+end)
+
+subLabel("Speed Saat Tembus Obstacle / NoClip (Aman: 1.05)")
+makeSlider(0.1, 5.0, Config.NoClipTweenSpeed, 0.05, Color3.fromRGB(60, 180, 110), Color3.fromRGB(120, 240, 160), Color3.fromRGB(180, 255, 200), function(v)
+    Config.NoClipTweenSpeed = v
+end)
+
+-- [ 9.3: SAFE PLACE & REAL ELEVATOR UI ]
+divider()
+sectionLabel("SAFE PLACE & REAL ELEVATOR (Panic Mode)")
+local safeBtn     = makeBtn("🏠 Teleport ke Safe Place", Color3.fromRGB(30, 60, 100), Color3.fromRGB(180, 210, 255))
+local realElevBtn = makeBtn("🔀 Teleport ke Real Elevator", Color3.fromRGB(45, 95, 75), Color3.fromRGB(190, 255, 220))
+local autoElevBtn = makeBtn("🚨 Auto Masuk Lift (Mesin Done): ON", Color3.fromRGB(40, 120, 70), Color3.fromRGB(255, 255, 255))
+local safeSt      = statusLbl()
+
+local function updateAutoElevUI()
+    if Config.AutoElevator then
+        autoElevBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 70)
+        autoElevBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+        autoElevBtn.Text             = "🚨 Auto Masuk Lift (Mesin Done): ON"
+    else
+        autoElevBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+        autoElevBtn.TextColor3       = Color3.fromRGB(160, 160, 180)
+        autoElevBtn.Text             = "🚨 Auto Masuk Lift (Mesin Done): OFF"
+    end
+end
+updateAutoElevUI()
+
+safeBtn.MouseButton1Click:Connect(function()
+    local cf = getSafePlaceCFrame()
+    if cf then
+        task.spawn(function() doTeleport(cf, Config.TeleportMode, Config.TweenSpeed) end)
+        safeSt.Text = "✔ Teleported ke Safe Place!"; safeSt.TextColor3 = Color3.fromRGB(100, 220, 120)
+    else
+        safeSt.Text = "✘ Safe Place tidak ditemukan"; safeSt.TextColor3 = Color3.fromRGB(220, 100, 100)
+    end
+    task.delay(2, function() safeSt.Text = "" end)
+end)
+
+realElevBtn.MouseButton1Click:Connect(function()
+    local cf = getRealElevatorCFrame()
+    if cf then
+        task.spawn(function() doTeleport(cf, Config.TeleportMode, Config.TweenSpeed) end)
+        safeSt.Text = "✔ Menuju Real Elevator!"; safeSt.TextColor3 = Color3.fromRGB(120, 255, 190)
+    else
+        safeSt.Text = "✘ Real Elevator tidak ditemukan"; safeSt.TextColor3 = Color3.fromRGB(220, 100, 100)
+    end
+    task.delay(2, function() safeSt.Text = "" end)
+end)
+
+autoElevBtn.MouseButton1Click:Connect(function()
+    Config.AutoElevator = not Config.AutoElevator
+    updateAutoElevUI()
+end)
+
+task.spawn(function()
+    local inElevatorStandby = false
+    local isMovingToElev    = false
+
+    while _G.TeleportGUI_Loaded do
+        if Config.AutoElevator and rootPart and not abortTeleport then
+            local isDone, curG, totG = isFloorAllMachinesDone()
+            if isDone then
+                local elevatorTarget = getRealElevatorCFrame()
+                if elevatorTarget then
+                    local flatDist = Vector2.new(rootPart.Position.X - elevatorTarget.Position.X, rootPart.Position.Z - elevatorTarget.Position.Z).Magnitude
+
+                    if not inElevatorStandby then
+                        inElevatorStandby = true
+                        print(string.format("[AUTO ELEVATOR] Semua Mesin Selesai (%d/%d)! Wajib menuju Real Elevator...", curG, totG))
+                    end
+
+                    if isPickingUp then
+                        isPickingUp = false
+                        clearAllServerSyncedHolds()
+                        if rootPart then rootPart.Anchored = false end
+                    end
+
+                    if flatDist > 2.0 and not isMovingToElev and not isHiding then
+                        isMovingToElev = true
+                        safeSt.Text = string.format("🚨 Mesin Done (%d/%d)! Instant TP ke Lift...", curG, totG)
+                        safeSt.TextColor3 = Color3.fromRGB(255, 210, 90)
+                        pcall(function()
+                            teleportInstant(elevatorTarget, false)
+                        end)
+                        if rootPart then rootPart.Anchored = false end
+                        safeSt.Text = "✔ Standby di dalam Real Elevator!"
+                        safeSt.TextColor3 = Color3.fromRGB(100, 255, 160)
+                        isMovingToElev = false
+                    elseif flatDist <= 2.0 then
+                        if rootPart and rootPart.Anchored then
+                            rootPart.Anchored = false
+                        end
+                    end
+                end
+            else
+                if inElevatorStandby then
+                    inElevatorStandby = false
+                    safeSt.Text = ""
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- [ 9.4: WAYPOINTS UI ]
+divider()
+sectionLabel("WAYPOINTS")
+local btnSetA, btnTpA = makeTogglePair("📍 Set Titik A", "→ Teleport A")
+btnSetA.BackgroundColor3 = Color3.fromRGB(35, 35, 55); btnSetA.TextColor3 = Color3.fromRGB(220, 180, 80)
+btnTpA.BackgroundColor3  = Color3.fromRGB(25, 25, 40); btnTpA.TextColor3  = Color3.fromRGB(130, 130, 150)
+local lblA = subLabel("Titik A: belum di-set")
+
+local btnSetB, btnTpB = makeTogglePair("📍 Set Titik B", "→ Teleport B")
+btnSetB.BackgroundColor3 = Color3.fromRGB(35, 35, 55); btnSetB.TextColor3 = Color3.fromRGB(80, 200, 220)
+btnTpB.BackgroundColor3  = Color3.fromRGB(25, 25, 40); btnTpB.TextColor3  = Color3.fromRGB(130, 130, 150)
+local lblB = subLabel("Titik B: belum di-set")
+
+local wpSt = statusLbl()
+local function fmtPos(cf)
+    local p = cf.Position
+    return string.format("(%.1f, %.1f, %.1f)", p.X, p.Y, p.Z)
+end
+
+btnSetA.MouseButton1Click:Connect(function()
+    if not rootPart then return end
+    Waypoints.A = rootPart.CFrame
+    lblA.Text = "Titik A: " .. fmtPos(Waypoints.A); lblA.TextColor3 = Color3.fromRGB(220, 180, 80)
+    btnTpA.BackgroundColor3 = Color3.fromRGB(80, 65, 20); btnTpA.TextColor3 = Color3.fromRGB(220, 180, 80)
+    wpSt.Text = "✔ Titik A disimpan!"; wpSt.TextColor3 = Color3.fromRGB(220, 180, 80)
+    task.delay(1.5, function() wpSt.Text = "" end)
+end)
+
+btnSetB.MouseButton1Click:Connect(function()
+    if not rootPart then return end
+    Waypoints.B = rootPart.CFrame
+    lblB.Text = "Titik B: " .. fmtPos(Waypoints.B); lblB.TextColor3 = Color3.fromRGB(80, 200, 220)
+    btnTpB.BackgroundColor3 = Color3.fromRGB(20, 65, 80); btnTpB.TextColor3 = Color3.fromRGB(80, 200, 220)
+    wpSt.Text = "✔ Titik B disimpan!"; wpSt.TextColor3 = Color3.fromRGB(80, 200, 220)
+    task.delay(1.5, function() wpSt.Text = "" end)
+end)
+
+btnTpA.MouseButton1Click:Connect(function()
+    if not Waypoints.A then wpSt.Text = "⚠ Set Titik A dulu!"; wpSt.TextColor3 = Color3.fromRGB(220, 120, 80); task.delay(1.5, function() wpSt.Text = "" end); return end
+    task.spawn(function() doTeleport(Waypoints.A, Config.TeleportMode, Config.TweenSpeed) end)
+    wpSt.Text = "→ Teleported ke Titik A"; wpSt.TextColor3 = Color3.fromRGB(220, 180, 80)
+    task.delay(1.5, function() wpSt.Text = "" end)
+end)
+
+btnTpB.MouseButton1Click:Connect(function()
+    if not Waypoints.B then wpSt.Text = "⚠ Set Titik B dulu!"; wpSt.TextColor3 = Color3.fromRGB(220, 120, 80); task.delay(1.5, function() wpSt.Text = "" end); return end
+    task.spawn(function() doTeleport(Waypoints.B, Config.TeleportMode, Config.TweenSpeed) end)
+    wpSt.Text = "→ Teleported ke Titik B"; wpSt.TextColor3 = Color3.fromRGB(80, 200, 220)
+    task.delay(1.5, function() wpSt.Text = "" end)
+end)
+
+local btnAtoB = makeBtn("🔀 Teleport A → B", Color3.fromRGB(60, 35, 90), Color3.fromRGB(200, 150, 255))
+btnAtoB.MouseButton1Click:Connect(function()
+    if not Waypoints.A or not Waypoints.B then
+        wpSt.Text = "⚠ Set kedua titik dulu!"; wpSt.TextColor3 = Color3.fromRGB(220, 120, 80)
+        task.delay(1.5, function() wpSt.Text = "" end)
+        return
+    end
+    task.spawn(function()
+        doTeleport(Waypoints.A, Config.TeleportMode, Config.TweenSpeed)
+        task.wait(0.3)
+        doTeleport(Waypoints.B, Config.TeleportMode, Config.TweenSpeed)
+    end)
+    wpSt.Text = "→ A → B selesai!"; wpSt.TextColor3 = Color3.fromRGB(200, 150, 255)
+    task.delay(1.5, function() wpSt.Text = "" end)
+end)
+
+-- [ 9.5: ESP TOGGLES UI ]
+divider()
+sectionLabel("ESP TOGGLES")
+local espI, espT = makeTogglePair("🟢 Item ESP", "🔵 Gen ESP")
+local espM, espL = makeTogglePair("🔴 Monster ESP", "📏 Line ESP")
+local rangeEspBtn  = makeBtn("🟢 Range ESP (Bulatan Radius Slider): ON", Color3.fromRGB(25, 95, 50), Color3.fromRGB(130, 255, 160))
+local noClipEspBtn = makeBtn("🔴 NoClip ESP: OFF", Color3.fromRGB(30, 30, 45), Color3.fromRGB(140, 140, 160))
+local noClipLblBtn = makeBtn("🏷 NoClip Label: OFF", Color3.fromRGB(30, 30, 45), Color3.fromRGB(140, 140, 160))
+
+local function updateESPUI()
+    local itemEspOn = isItemESPEnabled()
+    espI.BackgroundColor3 = itemEspOn         and Color3.fromRGB(30, 90, 50)  or Color3.fromRGB(30, 30, 45)
+    espI.TextColor3       = itemEspOn         and Color3.fromRGB(100, 220, 120) or Color3.fromRGB(140, 140, 160)
+    espT.BackgroundColor3 = Config.GenESP     and Color3.fromRGB(30, 50, 100) or Color3.fromRGB(30, 30, 45)
+    espT.TextColor3       = Config.GenESP     and Color3.fromRGB(120, 170, 255) or Color3.fromRGB(140, 140, 160)
+    espM.BackgroundColor3 = Config.MonsterESP and Color3.fromRGB(90, 25, 25)  or Color3.fromRGB(30, 30, 45)
+    espM.TextColor3       = Config.MonsterESP and Color3.fromRGB(255, 90, 90) or Color3.fromRGB(140, 140, 160)
+    espL.BackgroundColor3 = Config.LineESP    and Color3.fromRGB(70, 50, 20)  or Color3.fromRGB(30, 30, 45)
+    espL.TextColor3       = Config.LineESP    and Color3.fromRGB(255, 200, 60) or Color3.fromRGB(140, 140, 160)
+
+    rangeEspBtn.BackgroundColor3 = Config.RangeESP and Color3.fromRGB(25, 95, 50) or Color3.fromRGB(30, 30, 45)
+    rangeEspBtn.TextColor3       = Config.RangeESP and Color3.fromRGB(130, 255, 160) or Color3.fromRGB(140, 140, 160)
+    rangeEspBtn.Text             = Config.RangeESP and "🟢 Range ESP (Bulatan Radius Slider): ON" or "🟢 Range ESP (Bulatan Radius Slider): OFF"
+
+    noClipEspBtn.BackgroundColor3 = Config.NoClipESP and Color3.fromRGB(80, 20, 20) or Color3.fromRGB(30, 30, 45)
+    noClipEspBtn.TextColor3       = Config.NoClipESP and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(140, 140, 160)
+    noClipEspBtn.Text             = Config.NoClipESP and "🔴 NoClip ESP: ON" or "🔴 NoClip ESP: OFF"
+
+    noClipLblBtn.BackgroundColor3 = Config.NoClipLabel and Color3.fromRGB(70, 30, 10) or Color3.fromRGB(30, 30, 45)
+    noClipLblBtn.TextColor3       = Config.NoClipLabel and Color3.fromRGB(255, 160, 80) or Color3.fromRGB(140, 140, 160)
+    noClipLblBtn.Text             = Config.NoClipLabel and "🏷 NoClip Label: ON" or "🏷 NoClip Label: OFF"
+end
+updateESPUI()
+refreshRangeESP()
+
+espI.MouseButton1Click:Connect(function()
+    local nextState = not isItemESPEnabled()
+    setItemESPEnabled(nextState)
+    if not nextState then clearESP("_ItemESP") else refreshItemESP() end
+    updateESPUI()
+end)
+espT.MouseButton1Click:Connect(function() Config.GenESP = not Config.GenESP; if not Config.GenESP then clearESP("_GenESP") else refreshGenESP() end; updateESPUI() end)
+espM.MouseButton1Click:Connect(function() Config.MonsterESP = not Config.MonsterESP; if not Config.MonsterESP then clearESP("_MonsterESP") else refreshMonsterESP() end; updateESPUI() end)
+espL.MouseButton1Click:Connect(function() Config.LineESP = not Config.LineESP; refreshLineESP(); updateESPUI() end)
+rangeEspBtn.MouseButton1Click:Connect(function() Config.RangeESP = not Config.RangeESP; refreshRangeESP(); updateESPUI() end)
+noClipEspBtn.MouseButton1Click:Connect(function() Config.NoClipESP = not Config.NoClipESP; if not Config.NoClipESP then clearNoClipESP() else refreshNoClipESP() end; updateESPUI() end)
+noClipLblBtn.MouseButton1Click:Connect(function() Config.NoClipLabel = not Config.NoClipLabel; if Config.NoClipESP then refreshNoClipESP() end; updateESPUI() end)
+
+-- [ 9.6: PATHFINDING, UNDERGROUND & MONSTER SLIDERS UI ]
+divider()
+sectionLabel("PATHFINDING & EVASION (Tween Only)")
+local pfBtn  = makeBtn("🗺 Pathfind: OFF", Color3.fromRGB(30, 30, 45), Color3.fromRGB(140, 140, 160))
+local ugBtn2 = makeBtn("🕳 Underground TP: OFF", Color3.fromRGB(30, 30, 45), Color3.fromRGB(140, 140, 160))
+
+subLabel("Ketebalan min. Collider sembunyi (studs)")
+makeSlider(2.0, 10.0, Config.MinHideThickness, 0.5, Color3.fromRGB(40, 160, 180), Color3.fromRGB(100, 220, 240), Color3.fromRGB(160, 240, 255), function(v)
+    Config.MinHideThickness = v
+    updateColliderCaches()
+end)
+
+subLabel("Depth bawah lantai (studs)")
+makeSlider(2, 30, Config.UGDepth, 1, Color3.fromRGB(200, 130, 40), Color3.fromRGB(255, 180, 80), Color3.fromRGB(255, 180, 80), function(v)
+    Config.UGDepth = v
+end)
+
+subLabel("Speed masuk Collider / Underground")
+makeSlider(0.1, 5.0, Config.UGRiseSpeed, 0.05, Color3.fromRGB(80, 200, 120), Color3.fromRGB(120, 255, 160), Color3.fromRGB(180, 255, 180), function(v)
+    Config.UGRiseSpeed = v
+end)
+
+subLabel("Wait setelah monster pergi (detik)")
+makeSlider(0, 15.0, Config.MonsterSafeDelay, 0.1, Color3.fromRGB(200, 80, 80), Color3.fromRGB(255, 120, 120), Color3.fromRGB(255, 120, 120), function(v)
+    Config.MonsterSafeDelay = v
+end)
+
+subLabel("Radius bahaya monster aktif (studs)")
+makeSlider(5, 60, Config.MonsterDangerRadius, 1, Color3.fromRGB(220, 60, 60), Color3.fromRGB(255, 100, 100), Color3.fromRGB(255, 100, 100), function(v)
+    Config.MonsterDangerRadius = v
+    if Config.RangeESP then refreshRangeESP() end
+end)
+
+subLabel("Radius hindar monster pasif / Loose (studs)")
+makeSlider(5, 25, Config.LooseRadius, 1, Color3.fromRGB(230, 140, 40), Color3.fromRGB(255, 190, 90), Color3.fromRGB(255, 210, 130), function(v)
+    Config.LooseRadius = v
+    if Config.RangeESP then refreshRangeESP() end
+end)
+
+local pfSt = statusLbl()
+pfSt.Text = "Aktif saat mode Tween / Hybrid dipilih"; pfSt.TextColor3 = Color3.fromRGB(90, 90, 120)
+pfStatusRef = pfSt
+
+updatePFBtn = function()
+    if Config.PathfindMode then
+        pfBtn.BackgroundColor3 = Color3.fromRGB(50, 30, 90); pfBtn.TextColor3 = Color3.fromRGB(180, 120, 255)
+        pfBtn.Text = "🗺 Pathfind: ON"
+    else
+        pfBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45); pfBtn.TextColor3 = Color3.fromRGB(140, 140, 160)
+        pfBtn.Text = "🗺 Pathfind: OFF"
+        pfSt.Text  = "Aktif saat mode Tween / Hybrid dipilih"; pfSt.TextColor3 = Color3.fromRGB(90, 90, 120)
+    end
+end
+
+local function updateUGBtn()
+    if Config.UndergroundTeleport then
+        ugBtn2.BackgroundColor3 = Color3.fromRGB(60, 40, 20); ugBtn2.TextColor3 = Color3.fromRGB(255, 180, 80)
+        ugBtn2.Text = "🕳 Underground TP: ON"
+    else
+        ugBtn2.BackgroundColor3 = Color3.fromRGB(30, 30, 45); ugBtn2.TextColor3 = Color3.fromRGB(140, 140, 160)
+        ugBtn2.Text = "🕳 Underground TP: OFF"
+    end
+end
+updatePFBtn()
+updateUGBtn()
+
+pfBtn.MouseButton1Click:Connect(function()
+    if not Config.PathfindMode and Config.TeleportMode ~= "Tween" then
+        pfSt.Text = "⚠ Ganti ke mode Tween dulu!"; pfSt.TextColor3 = Color3.fromRGB(220, 150, 60)
+        task.delay(2, function() pfSt.Text = "Aktif saat mode Tween / Hybrid dipilih"; pfSt.TextColor3 = Color3.fromRGB(90, 90, 120) end)
+        return
+    end
+    Config.PathfindMode = not Config.PathfindMode
+    if Config.PathfindMode then
+        updateColliderCaches()
+        pfSt.Text = "✔ 1-Layer Priority + NavMesh Ready (" .. #cachedHideCols .. " Thick)"; pfSt.TextColor3 = Color3.fromRGB(160, 120, 255)
+    else
+        clearPathVisuals()
+    end
+    updatePFBtn()
+end)
+
+ugBtn2.MouseButton1Click:Connect(function()
+    Config.UndergroundTeleport = not Config.UndergroundTeleport
+    updateUGBtn()
+end)
+
+-- [ 9.7: GENERATOR TELEPORT UI ]
+divider()
+sectionLabel("GENERATOR TELEPORT (Test Hybrid / Tween)")
+
+local genDdFrame = Instance.new("Frame", content)
+genDdFrame.Size             = UDim2.new(1, 0, 0, 32)
+genDdFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 36)
+genDdFrame.BorderSizePixel  = 0
+genDdFrame.LayoutOrder      = nextLO()
+Instance.new("UICorner", genDdFrame).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", genDdFrame).Color        = Color3.fromRGB(60, 90, 150)
+
+local genDdLabel = Instance.new("TextLabel", genDdFrame)
+genDdLabel.Size                   = UDim2.new(1, -32, 1, 0)
+genDdLabel.Position               = UDim2.new(0, 10, 0, 0)
+genDdLabel.BackgroundTransparency = 1
+genDdLabel.Text                   = "Pilih Generator..."
+genDdLabel.TextColor3             = Color3.fromRGB(160, 200, 255)
+genDdLabel.Font                   = Enum.Font.Gotham
+genDdLabel.TextSize               = 12
+genDdLabel.TextXAlignment         = Enum.TextXAlignment.Left
+
+local genDdArrow = Instance.new("TextLabel", genDdFrame)
+genDdArrow.Size                   = UDim2.new(0, 24, 1, 0)
+genDdArrow.Position               = UDim2.new(1, -28, 0, 0)
+genDdArrow.BackgroundTransparency = 1
+genDdArrow.Text                   = "▼"
+genDdArrow.TextColor3             = Color3.fromRGB(110, 150, 210)
+genDdArrow.Font                   = Enum.Font.GothamBold
+genDdArrow.TextSize               = 11
+
+local genDdList = Instance.new("ScrollingFrame", mainFrame)
+genDdList.BackgroundColor3   = Color3.fromRGB(18, 18, 30)
+genDdList.BorderSizePixel    = 0
+genDdList.ScrollBarThickness = 3
+genDdList.Visible            = false
+genDdList.ZIndex             = 22
+Instance.new("UICorner", genDdList).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", genDdList).Color        = Color3.fromRGB(60, 90, 150)
+local genDdLayout = Instance.new("UIListLayout", genDdList)
+genDdLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local selectedGenData, genDdOpen = nil, false
+local function closeGenDd() genDdOpen = false; genDdArrow.Text = "▼"; genDdList.Visible = false end
+
+local function refreshGenDd()
+    for _, c in ipairs(genDdList:GetChildren()) do
+        if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
+    end
+    local gens = getGeneratorsInRoom()
+    local n = #gens
+    for idx, gData in ipairs(gens) do
+        local b = Instance.new("TextButton", genDdList)
+        b.Size                   = UDim2.new(1, 0, 0, 28)
+        b.BackgroundTransparency = 1
+        b.TextColor3             = gData.completed and Color3.fromRGB(180, 120, 255) or Color3.fromRGB(160, 220, 255)
+        b.Font                   = Enum.Font.Gotham
+        b.TextSize               = 12
+        b.Text                   = "  " .. gData.label
+        b.TextXAlignment         = Enum.TextXAlignment.Left
+        b.ZIndex                 = 23
+        b.LayoutOrder            = idx
+        b.MouseEnter:Connect(function() b.BackgroundTransparency = 0; b.BackgroundColor3 = Color3.fromRGB(35, 45, 75) end)
+        b.MouseLeave:Connect(function() b.BackgroundTransparency = 1 end)
+        b.MouseButton1Click:Connect(function()
+            selectedGenData = gData
+            genDdLabel.Text = gData.label
+            closeGenDd()
+        end)
+    end
+    if n == 0 then
+        local l = Instance.new("TextLabel", genDdList)
+        l.Size                   = UDim2.new(1, 0, 0, 28)
+        l.BackgroundTransparency = 1
+        l.TextColor3             = Color3.fromRGB(110, 110, 140)
+        l.Font                   = Enum.Font.Gotham
+        l.TextSize               = 12
+        l.Text                   = "  Tidak ada Generator di room"
+        l.ZIndex                 = 23
+        n = 1
+    end
+    local h     = math.min(n * 28, 120)
+    local dfAbs = genDdFrame.AbsolutePosition
+    local mfAbs = mainFrame.AbsolutePosition
+    local dfSz  = genDdFrame.AbsoluteSize
+    genDdList.CanvasSize = UDim2.new(0, 0, 0, n * 28)
+    genDdList.Position   = UDim2.new(0, dfAbs.X - mfAbs.X, 0, math.min(dfAbs.Y - mfAbs.Y + dfSz.Y + 2, mainFrame.AbsoluteSize.Y - h - 8))
+    genDdList.Size       = UDim2.new(0, dfSz.X, 0, h)
+end
+
+local genDdBtn = Instance.new("TextButton", genDdFrame)
+genDdBtn.Size                   = UDim2.new(1, 0, 1, 0)
+genDdBtn.BackgroundTransparency = 1
+genDdBtn.Text                   = ""
+genDdBtn.ZIndex                 = 5
+genDdBtn.MouseButton1Click:Connect(function()
+    if genDdOpen then closeGenDd() else genDdOpen = true; genDdArrow.Text = "▲"; refreshGenDd(); genDdList.Visible = true end
+end)
+
+local rfGenBtn   = makeBtn("🔄 Refresh Generator List", Color3.fromRGB(25, 35, 55), Color3.fromRGB(130, 190, 255))
+local tpGenBtn   = makeBtn("⚡ Teleport ke Generator Terpilih", Color3.fromRGB(40, 85, 160), Color3.fromRGB(255, 255, 255))
+local nextGenBtn = makeBtn("🔀 TP ke Generator Terdekat (Belum Done)", Color3.fromRGB(75, 45, 135), Color3.fromRGB(220, 180, 255))
+local genSt      = statusLbl()
+
+rfGenBtn.MouseButton1Click:Connect(function()
+    refreshGenDd()
+    rfGenBtn.Text = "✔ Generator List Refreshed!"
+    task.delay(1, function() rfGenBtn.Text = "🔄 Refresh Generator List" end)
+end)
+
+tpGenBtn.MouseButton1Click:Connect(function()
+    if not selectedGenData or not selectedGenData.model or not selectedGenData.model.Parent then
+        genSt.Text = "⚠ Pilih Generator dulu / Refresh list!"; genSt.TextColor3 = Color3.fromRGB(220, 180, 80)
+        return
+    end
+    genSt.Text = "⏳ Menuju " .. selectedGenData.label .. "..."; genSt.TextColor3 = Color3.fromRGB(140, 210, 255)
+    task.spawn(function()
+        doTeleport(selectedGenData.cf, Config.TeleportMode, Config.TweenSpeed)
+        genSt.Text = "✔ Sampai di " .. selectedGenData.label .. "!"
+        task.delay(2.5, function() genSt.Text = "" end)
+    end)
+end)
+
+nextGenBtn.MouseButton1Click:Connect(function()
+    local gens = getGeneratorsInRoom()
+    if #gens == 0 then
+        genSt.Text = "⚠ Tidak ada Generator di room!"; genSt.TextColor3 = Color3.fromRGB(220, 120, 80)
+        return
+    end
+
+    local candidates = {}
+    for _, g in ipairs(gens) do
+        local dist = rootPart and (rootPart.Position - g.position).Magnitude or 999
+        if not g.completed and dist > 8.0 then
+            table.insert(candidates, { data = g, dist = dist })
+        end
+    end
+
+    if #candidates == 0 then
+        for _, g in ipairs(gens) do
+            local dist = rootPart and (rootPart.Position - g.position).Magnitude or 999
+            if dist > 8.0 then
+                table.insert(candidates, { data = g, dist = dist })
+            end
+        end
+    end
+
+    if #candidates == 0 then
+        candidates = { { data = gens[1], dist = 0 } }
+    end
+
+    table.sort(candidates, function(a, b) return a.dist < b.dist end)
+    local targetGen = candidates[1].data
+    selectedGenData = targetGen
+    genDdLabel.Text = targetGen.label
+
+    genSt.Text = "⏳ Pindah ke " .. targetGen.label .. "..."; genSt.TextColor3 = Color3.fromRGB(200, 160, 255)
+    task.spawn(function()
+        doTeleport(targetGen.cf, Config.TeleportMode, Config.TweenSpeed)
+        genSt.Text = "✔ Sampai di " .. targetGen.label .. "!"
+        task.delay(2.5, function() genSt.Text = "" end)
+    end)
+end)
+
+-- [ 9.8: SMART AUTO PRIORITY PICKUP & MANUAL ITEM PICKER UI ]
+divider()
+sectionLabel("SMART AUTO PRIORITY PICKUP (Config List)")
+
+local autoPrioToggleBtn = makeBtn("🤖 Auto Priority Pickup (Config): ON", Color3.fromRGB(35, 115, 65), Color3.fromRGB(255, 255, 255))
+local runPrioNowBtn     = makeBtn("⚡ Jalankan Priority Pickup Sekarang", Color3.fromRGB(45, 95, 145), Color3.fromRGB(200, 235, 255))
+
+local function updateAutoPrioUI()
+    local enabled = Config.Pickup and Config.Pickup.Enable
+    if enabled then
+        autoPrioToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 115, 65)
+        autoPrioToggleBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+        autoPrioToggleBtn.Text             = "🤖 Auto Priority Pickup (Config): ON"
+    else
+        autoPrioToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+        autoPrioToggleBtn.TextColor3       = Color3.fromRGB(160, 160, 180)
+        autoPrioToggleBtn.Text             = "🤖 Auto Priority Pickup (Config): OFF"
+    end
+end
+updateAutoPrioUI()
+
+subLabel("Aura Range Auto Pickup (studs)")
+makeSlider(5, 60, Config.Pickup and Config.Pickup.AuraRange or 30, 1, Color3.fromRGB(50, 175, 120), Color3.fromRGB(120, 245, 180), Color3.fromRGB(170, 255, 210), function(v)
+    if Config.Pickup then Config.Pickup.AuraRange = v end
+end)
+
+subLabel("Manual Item Picker (Opsional)")
+local ddFrame = Instance.new("Frame", content)
+ddFrame.Size             = UDim2.new(1, 0, 0, 32)
+ddFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 36)
+ddFrame.BorderSizePixel  = 0
+ddFrame.LayoutOrder      = nextLO()
+Instance.new("UICorner", ddFrame).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", ddFrame).Color        = Color3.fromRGB(55, 55, 85)
+
+local ddLabel = Instance.new("TextLabel", ddFrame)
+ddLabel.Size                   = UDim2.new(1, -32, 1, 0)
+ddLabel.Position               = UDim2.new(0, 10, 0, 0)
+ddLabel.BackgroundTransparency = 1
+ddLabel.Text                   = "Pilih Item Manual..."
+ddLabel.TextColor3             = Color3.fromRGB(170, 170, 210)
+ddLabel.Font                   = Enum.Font.Gotham
+ddLabel.TextSize               = 12
+ddLabel.TextXAlignment         = Enum.TextXAlignment.Left
+
+local ddArrow = Instance.new("TextLabel", ddFrame)
+ddArrow.Size                   = UDim2.new(0, 24, 1, 0)
+ddArrow.Position               = UDim2.new(1, -28, 0, 0)
+ddArrow.BackgroundTransparency = 1
+ddArrow.Text                   = "▼"
+ddArrow.TextColor3             = Color3.fromRGB(110, 110, 150)
+ddArrow.Font                   = Enum.Font.GothamBold
+ddArrow.TextSize               = 11
+
+local ddList = Instance.new("ScrollingFrame", mainFrame)
+ddList.BackgroundColor3   = Color3.fromRGB(18, 18, 30)
+ddList.BorderSizePixel    = 0
+ddList.ScrollBarThickness = 3
+ddList.Visible            = false
+ddList.ZIndex             = 20
+Instance.new("UICorner", ddList).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", ddList).Color        = Color3.fromRGB(55, 55, 85)
+local ddLayout = Instance.new("UIListLayout", ddList)
+ddLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local selectedItem, ddOpen = nil, false
+local function closeDd() ddOpen = false; ddArrow.Text = "▼"; ddList.Visible = false end
+
+local function refreshDd()
+    for _, c in ipairs(ddList:GetChildren()) do
+        if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
+    end
+    local items, n = getItemsInRoom(), 0
+    for name, data in pairs(items) do
+        local tier = getItemPriorityTier(name)
+        local prefix = (tier == 1) and "⭐ " or (tier == 2 and "💊 " or (tier == nil and "🚫 " or "  "))
+        local b = Instance.new("TextButton", ddList)
+        b.Size                   = UDim2.new(1, 0, 0, 28)
+        b.BackgroundTransparency = 1
+        b.TextColor3             = (tier == 1) and Color3.fromRGB(255, 220, 90) or (tier == 2 and Color3.fromRGB(110, 225, 255) or Color3.fromRGB(200, 200, 230))
+        b.Font                   = Enum.Font.Gotham
+        b.TextSize               = 12
+        b.Text                   = " " .. prefix .. name .. " (" .. data.count .. ")"
+        b.TextXAlignment         = Enum.TextXAlignment.Left
+        b.ZIndex                 = 21
+        b.LayoutOrder            = n
+        b.MouseEnter:Connect(function() b.BackgroundTransparency = 0; b.BackgroundColor3 = Color3.fromRGB(35, 35, 60) end)
+        b.MouseLeave:Connect(function() b.BackgroundTransparency = 1 end)
+        b.MouseButton1Click:Connect(function()
+            selectedItem = name
+            ddLabel.Text = name .. " (" .. data.count .. ")"
+            closeDd()
+        end)
+        n = n + 1
+    end
+    if n == 0 then
+        local l = Instance.new("TextLabel", ddList)
+        l.Size                   = UDim2.new(1, 0, 0, 28)
+        l.BackgroundTransparency = 1
+        l.TextColor3             = Color3.fromRGB(110, 110, 140)
+        l.Font                   = Enum.Font.Gotham
+        l.TextSize               = 12
+        l.Text                   = "  Tidak ada item di room"
+        l.ZIndex                 = 21
+        n = 1
+    end
+    local h     = math.min(n * 28, 120)
+    local dfAbs = ddFrame.AbsolutePosition
+    local mfAbs = mainFrame.AbsolutePosition
+    local dfSz  = ddFrame.AbsoluteSize
+    ddList.CanvasSize = UDim2.new(0, 0, 0, n * 28)
+    ddList.Position   = UDim2.new(0, dfAbs.X - mfAbs.X, 0, math.min(dfAbs.Y - mfAbs.Y + dfSz.Y + 2, mainFrame.AbsoluteSize.Y - h - 8))
+    ddList.Size       = UDim2.new(0, dfSz.X, 0, h)
+end
+
+local ddBtn = Instance.new("TextButton", ddFrame)
+ddBtn.Size                   = UDim2.new(1, 0, 1, 0)
+ddBtn.BackgroundTransparency = 1
+ddBtn.Text                   = ""
+ddBtn.ZIndex                 = 5
+ddBtn.MouseButton1Click:Connect(function()
+    if ddOpen then closeDd() else ddOpen = true; ddArrow.Text = "▲"; refreshDd(); ddList.Visible = true end
+end)
+
+local rfBtn    = makeBtn("🔄 Refresh Item List", Color3.fromRGB(25, 45, 25), Color3.fromRGB(100, 200, 100))
+local puBtn    = makeBtn("🎯 Ambil Item Dropdown Manual", Color3.fromRGB(40, 130, 65), Color3.fromRGB(255, 255, 255))
+local abortBtn = makeBtn("🛑 Abort Teleport / Stop Pickup", Color3.fromRGB(40, 20, 20), Color3.fromRGB(180, 80, 80))
+local puSt     = statusLbl()
+puStatusRef    = puSt
+
+autoPrioToggleBtn.MouseButton1Click:Connect(function()
+    if not Config.Pickup then Config.Pickup = {} end
+    Config.Pickup.Enable = not Config.Pickup.Enable
+    updateAutoPrioUI()
+    if not Config.Pickup.Enable and isPickingUp then
+        abortTeleport = true
+        isPickingUp   = false
+        task.delay(0.5, function() abortTeleport = false end)
+    end
+end)
+
+runPrioNowBtn.MouseButton1Click:Connect(function()
+    if isPickingUp then puSt.Text = "⏳ Auto Pickup sedang berjalan..."; return end
+    table.clear(failedRollbackZones)
+    puSt.TextColor3 = Color3.fromRGB(160, 230, 255)
+    runSmartItemPickup(nil, function(msg)
+        puSt.Text = msg
+        if not isPickingUp then
+            task.delay(2.5, function()
+                if not isPickingUp then puSt.Text = ""; refreshDd() end
+            end)
+        end
+    end)
+end)
+
+rfBtn.MouseButton1Click:Connect(function()
+    table.clear(failedRollbackZones)
+    refreshDd()
+    rfBtn.Text = "✔ Refreshed!"
+    task.delay(1, function() rfBtn.Text = "🔄 Refresh Item List" end)
+end)
+
+abortBtn.MouseButton1Click:Connect(function()
+    abortTeleport   = true
+    isPickingUp     = false
+    isPathfinding   = false
+    isHiding        = false
+    forceCharNoClip = false
+    if Config.Pickup then Config.Pickup.Enable = false; updateAutoPrioUI() end
+    clearAllServerSyncedHolds()
+    setTargetColliderPassable(nil, false)
+    restoreNormalGravity()
+    clearPathVisuals()
+    if activeTween then pcall(function() activeTween:Cancel() end); activeTween = nil end
+    abortBtn.Text          = "🛑 Aborting..."
+    puBtn.BackgroundColor3 = Color3.fromRGB(40, 130, 65)
+    puBtn.Text             = "🎯 Ambil Item Dropdown Manual"
+    puBtn.Active           = true
+    if rootPart then rootPart.Anchored = false end
+    task.delay(1, function()
+        abortBtn.Text = "🛑 Abort Teleport / Stop Pickup"
+        abortTeleport = false
+    end)
+end)
+
+puBtn.MouseButton1Click:Connect(function()
+    if not selectedItem then puSt.Text = "⚠ Pilih item dulu!"; puSt.TextColor3 = Color3.fromRGB(220, 180, 80); return end
+    if isPickingUp then puSt.Text = "⏳ Sedang mengambil..."; return end
+    table.clear(failedRollbackZones)
+    puBtn.BackgroundColor3 = Color3.fromRGB(25, 80, 40)
+    puBtn.Text             = "⏳ Mengambil..."
+    puBtn.Active           = false
+    puSt.TextColor3        = Color3.fromRGB(160, 220, 160)
+    runSmartItemPickup(selectedItem, function(msg)
+        puSt.Text = msg
+        if not isPickingUp or msg:find("Selesai") or msg:find("tidak ada") then
+            task.delay(2.5, function()
+                if not isPickingUp then
+                    puSt.Text              = ""
+                    puBtn.BackgroundColor3 = Color3.fromRGB(40, 130, 65)
+                    puBtn.Text             = "🎯 Ambil Item Dropdown Manual"
+                    puBtn.Active           = true
+                    refreshDd()
+                end
+            end)
+        end
+    end)
+end)
+
+-- ==============================================================================
+-- SECTION 10: CLEANUP & ANTI-FLOAT FAILSAFE
+-- ==============================================================================
+closeBtn.MouseButton1Click:Connect(function()
+    abortTeleport         = true
+    isPickingUp           = false
+    isPathfinding         = false
+    isHiding              = false
+    _G.TeleportGUI_Loaded = false
+    Config.NoClip         = false
+    Config.NoClipESP      = false
+    if Config.Pickup then Config.Pickup.Enable = false end
+    forceCharNoClip       = false
+    pcall(function() RunService:UnbindFromRenderStep("_TeleportWalkSim") end)
+    if activeTween then pcall(function() activeTween:Cancel() end); activeTween = nil end
+    clearAllServerSyncedHolds()
+    applyNoClipState()
+    setTargetColliderPassable(nil, false)
+    restoreNormalGravity()
+    clearESP("_ItemESP")
+    clearESP("_GenESP")
+    clearESP("_MonsterESP")
+    clearESP("_LineESP")
+    clearRangeESP()
+    clearNoClipESP()
+    clearPathVisuals()
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v.Name == "_LineESPBeam" or v.Name == "_LineESPTarget" or v.Name == "_LineESPOrigin" or v.Name == "_PFVirtualBlocker" then
+            v:Destroy()
+        end
+    end
+    screenGui:Destroy()
+    print("[TELEPORT GUI v5] Ditutup. Script mati total.")
+end)
+
+player.CharacterAdded:Connect(function()
+    restoreNormalGravity()
+    isPathfinding   = false
+    isPickingUp     = false
+    abortTeleport   = false
+    isHiding        = false
+    forceCharNoClip = false
+    table.clear(failedRollbackZones)
+end)
